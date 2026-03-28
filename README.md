@@ -1,4 +1,6 @@
-# cli-prompt-cron
+<p align="center">
+  <img src="assets/header.jpg" alt="cli-prompt-cron" width="100%">
+</p>
 
 AI CLI 向けの cron デーモン + ブラウザダッシュボード。
 Gemini CLI・Codex など、スケジュール実行機能を持たない AI CLI にプロンプトの定期実行を追加します。
