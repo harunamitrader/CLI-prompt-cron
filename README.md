@@ -34,101 +34,85 @@ Claude Code でも利用可能です。
 
 ---
 
-## スキル（SKILL.md）について
+## 使い方
 
-`skills/SKILL.md` は、AI CLI に「ジョブの追加・編集・削除方法」を教えるドキュメントです。
-プラグインではなく、AI に読ませるだけで機能します。
+### SKILL.md とは
 
-### 各 CLI での使い方
+`skills/SKILL.md` は、AI CLI にジョブの管理方法を教えるドキュメントです。
+プラグインやインストールは不要で、AI に読ませるだけで機能します。
+SKILL.md のファイル位置からプロジェクトルートを自動解決するため、作業ディレクトリがどこでも正しく動きます。
+
+---
+
+### Step 1: セットアップ
+
+AI CLI に以下のプロンプトを貼ってください：
 
 **Gemini CLI**
-
 ```bash
-# プロジェクト内で
-gemini -p "skills/SKILL.md を読んで、毎朝9時に「今日のニュースをまとめて」と実行するジョブを作って"
+gemini -p "https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して、skills/SKILL.md を読んで"
 ```
 
 **Codex**
-
 ```bash
-# プロジェクト内で
-codex "skills/SKILL.md を読んで、毎朝9時に「今日のニュースをまとめて」と実行するジョブを作って"
+codex "https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して、skills/SKILL.md を読んで"
 ```
 
 **Claude Code**
-
 ```bash
-# プロジェクト内で
-claude -p "skills/SKILL.md を読んで、毎朝9時に「今日のニュースをまとめて」と実行するジョブを作って"
+claude -p "https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して、skills/SKILL.md を読んで"
 ```
 
-> SKILL.md は cli-prompt-cron リポジトリ内で実行する前提です。別プロジェクトへのコピーでは相対パスが合わなくなるため非推奨です。
+AI が自動でクローン → インストール → スキル読み込みを行います。
 
 ---
 
-## 自然言語での導入・使い方
+### Step 2: ジョブ管理
 
-### 導入（セットアップ）
-
-AI CLI に以下のプロンプトを貼るだけで導入できます：
+セットアップ後、同じセッション内ならそのまま自然言語で指示できます。
 
 ```
-https://github.com/harunamitrader/cli-prompt-cron のリポジトリをクローンして、npm install して、skills/SKILL.md を読んで。
-```
-
-AI が以下を自動で行います：
-1. リポジトリをクローン
-2. `npm install` を実行
-3. `skills/SKILL.md` を読み込んでジョブ管理の方法を習得
-
----
-
-### 使い方（ジョブ管理）
-
-導入後は自然言語でジョブを管理できます。
-
-**ジョブを追加する**
-
-```
-毎朝9時にGemini CLIに「GitHubのトレンドをまとめてレポートを作って」と実行するジョブを追加して。
+毎朝9時にGeminiに「GitHubのトレンドをまとめて」と実行するジョブを追加して。
 ```
 
 ```
 毎週月曜8時にCodexに「今週の作業計画を立てて」と実行するジョブを作って。
 ```
 
-**ジョブを停止・再開する**
-
 ```
 morning-reportを止めて
 ```
 
 ```
-ai-triviaを再開して
-```
-
-**ジョブ一覧を確認する**
-
-```
 登録されてるジョブを一覧で見せて
 ```
 
-**ダッシュボードを開く**
+> **新しいセッションの場合**は、先に SKILL.md を読ませてからジョブ操作を行ってください：
+> ```
+> cli-prompt-cron の skills/SKILL.md を読んで、毎朝9時に「ニュースまとめて」のジョブを追加して。
+> ```
+
+---
+
+### Step 3: ダッシュボード起動
 
 ```
-ダッシュボードを開いて
+cli-prompt-cron のデーモンとダッシュボードを起動して
 ```
 
-**デスクトップに起動ショートカットを作る**
+または手動で：
+
+```bash
+npm start        # デーモン + ダッシュボード + ブラウザが一括起動
+```
+
+**デスクトップショートカットを作る（AI に指示）**
 
 ```
-cli-prompt-cron のデスクトップショートカットを作って。ダブルクリックするだけでデーモンとダッシュボードが起動するようにして。
+cli-prompt-cron のデスクトップショートカットを作って。ダブルクリックでデーモンとダッシュボードが起動するようにして。
 ```
 
-AI が OS を自動判定して、以下を作成します：
-- **Windows**: デスクトップに `.bat` ファイル
-- **Mac**: デスクトップに `.command` ファイル
-- **Linux**: デスクトップに `.desktop` ファイル
+AI が OS を自動判定して作成します（Windows: `.bat` / Mac: `.command` / Linux: `.desktop`）
 
 ---
 
