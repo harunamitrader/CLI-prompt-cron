@@ -93,8 +93,8 @@
       background: #fff;
       border-radius: 12px;
       padding: 12px 15px;
-      min-width: 175px;
-      max-width: 210px;
+      min-width: 200px;
+      max-width: 280px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.07);
       flex-shrink: 0;
       border: 1px solid #EAE6DE;
@@ -133,6 +133,15 @@
       color: #4A7FA5;
       font-weight: 500;
       margin-bottom: 6px;
+    }
+    .job-card-command {
+      font-size: 11px;
+      color: #5D6D7E;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.4;
     }
     .job-card-next {
       font-size: 11px;
@@ -555,10 +564,12 @@
       const btnClass = active ? 'stop' : 'resume';
       const btnLabel = active ? '停止' : '再開';
       const killBtn = running ? `<button class="kill-btn" data-job="${esc(job.name)}">強制停止</button>` : '';
+      const cmd = job.command || '';
       return `<div class="job-card">
         <div class="job-card-top">${badge}</div>
         <div class="job-card-name" title="${esc(job.name || job.id || '—')}">${esc(job.name || job.id || '—')}</div>
         <div class="job-card-schedule">${esc(schedule)}</div>
+        ${cmd ? `<div class="job-card-command" title="${esc(cmd)}">${esc(cmd)}</div>` : ''}
         ${nextLabel ? `<div class="job-card-next">${nextLabel}</div>` : ''}
         <div class="job-card-actions">
           <button class="toggle-btn ${btnClass}" data-job="${esc(job.name)}">${btnLabel}</button>${killBtn}
