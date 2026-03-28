@@ -2,10 +2,10 @@
  * cli-prompt-cron daemon
  * Lightweight cron scheduler for AI CLI tools (Claude Code, Gemini CLI, Codex)
  *
- * Watches ~/.cli-prompt-cron/jobs/*.json with Chokidar for hot-reload.
+ * Watches data/jobs/*.json with Chokidar for hot-reload.
  * Runs commands via shell when cron fires.
- * Logs output to ~/.cli-prompt-cron/logs/YYYY-MM-DD.log
- * Saves execution results to ~/.cli-prompt-cron/results/<jobName>-<timestamp>.txt
+ * Logs output to data/logs/YYYY-MM-DD.log
+ * Saves execution results to data/results/<jobName>-<timestamp>.txt
  */
 
 import { watch } from 'chokidar';
@@ -19,12 +19,13 @@ import {
   readdirSync,
   existsSync,
 } from 'node:fs';
-import { join, basename } from 'node:path';
-import { homedir } from 'node:os';
+import { join, basename, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
-const BASE_DIR    = join(homedir(), '.cli-prompt-cron');
+const __dirname   = dirname(fileURLToPath(import.meta.url));
+const BASE_DIR    = join(__dirname, 'data');
 const JOBS_DIR    = join(BASE_DIR, 'jobs');
 const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');

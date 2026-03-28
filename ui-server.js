@@ -16,12 +16,11 @@ import http from 'node:http';
 import fs, { watchFile, unwatchFile } from 'node:fs';
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
-const BASE_DIR    = join(homedir(), '.cli-prompt-cron');
+const BASE_DIR    = join(__dirname, 'data');
 const JOBS_DIR    = join(BASE_DIR, 'jobs');
 const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');
