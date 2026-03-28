@@ -547,20 +547,18 @@
     } catch (e) { return null; }
   }
 
-  /* ── Parse command into CLI, flags, prompt ── */
+  /* ── Parse command into prompt and flags ── */
   function parseCommand(cmd) {
     if (!cmd) return { prompt: '', flags: '' };
-    // Extract the prompt (last quoted string)
+    // Extract the last quoted string as the prompt
     const promptMatch = cmd.match(/['"]([^'"]+)['"]\s*$/);
-    const prompt = promptMatch ? promptMatch[1] : cmd;
-    // Extract flags (--xxx parts)
-    const flagParts = cmd.match(/--[\w-]+(?:\s+'[^']*'|\s+"[^"]*"|\s+\S+)?/g) || [];
-    // Filter out flags that are part of the prompt argument
-    const flags = flagParts.filter(f => !f.match(/^-p\b/)).join(' ');
-    // Extract CLI name
-    const cliMatch = cmd.match(/^(\S+)/);
-    const cli = cliMatch ? cliMatch[1] : '';
-    return { cli, prompt, flags };
+    const prompt = promptMatch ? promptMatch[1] : '';
+    // Everything before the prompt quote is the base command + flags
+    const beforePrompt = promptMatch ? cmd.slice(0, cmd.lastIndexOf(promptMatch[0])).trim() : cmd;
+    // Extract just the flags (--xxx parts) from the base command
+    const flagParts = beforePrompt.match(/--[\w-]+/g) || [];
+    const flags = flagParts.join(' ');
+    return { prompt: prompt || cmd, flags };
   }
 
   /* ── Jobs ── */
