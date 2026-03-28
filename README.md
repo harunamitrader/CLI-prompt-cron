@@ -78,6 +78,20 @@ node scripts/create-shortcut.js
 
 自然言語でジョブを管理できます。プロンプトに `skills/SKILL.md を読んで` を含めてください。
 
+**テスト用（毎分実行）:**
+
+Codex:
+```
+cli-prompt-cron の skills/SKILL.md を読んで、毎分「AIに関するトリビアを1つtxtに追記してnotepadで開いて」というプロンプトをcodexに送信するジョブを作って。
+```
+
+Gemini CLI:
+```
+cli-prompt-cron の skills/SKILL.md を読んで、毎分「AIに関するトリビアを1つtxtに追記してnotepadで開いて」というプロンプトをgeminiに送信するジョブを作って。
+```
+
+**その他のプロンプト例:**
+
 ```
 cli-prompt-cron の skills/SKILL.md を読んで、毎朝9時にGeminiに「GitHubのトレンドをまとめて」というプロンプトを送信するジョブを追加して。
 ```
@@ -92,18 +106,6 @@ cli-prompt-cron の skills/SKILL.md を読んで、morning-reportを止めて。
 
 ```
 cli-prompt-cron の skills/SKILL.md を読んで、登録されてるジョブを一覧で見せて。
-```
-
-**テスト用（毎分実行）:**
-
-Codex:
-```
-cli-prompt-cron の skills/SKILL.md を読んで、毎分「AIに関するトリビアを1つtxtに追記してnotepadで開いて」というプロンプトをcodexに送信するジョブを作って。
-```
-
-Gemini CLI:
-```
-cli-prompt-cron の skills/SKILL.md を読んで、毎分「AIに関するトリビアを1つtxtに追記してnotepadで開いて」というプロンプトをgeminiに送信するジョブを作って。
 ```
 
 ---
