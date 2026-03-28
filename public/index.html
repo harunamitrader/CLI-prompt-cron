@@ -652,7 +652,7 @@
   function classifyLine(text) {
     if (/FIRE/i.test(text))   return 'log-fire';
     if (/EXIT/i.test(text))   return 'log-exit';
-    if (/stderr/i.test(text)) return 'log-stderr';
+    if (/stderr/i.test(text) && /error|fail|exception|panic|fatal/i.test(text)) return 'log-stderr';
     if (/daemon/i.test(text)) return 'log-daemon';
     return 'log-stdout';
   }
