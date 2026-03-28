@@ -38,21 +38,10 @@ Claude Code でも利用可能です。
 
 ### Step 1: セットアップ
 
-AI CLI に以下のプロンプトを貼ってください：
+お使いの AI CLI に以下のプロンプトを貼ってください：
 
-**Gemini CLI**
-```bash
-gemini -p "https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して"
 ```
-
-**Codex**
-```bash
-codex "https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して"
-```
-
-**Claude Code**
-```bash
-claude -p "https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して"
+https://github.com/harunamitrader/cli-prompt-cron をクローンして、npm install して
 ```
 
 AI が自動でクローン → インストールを行います。
