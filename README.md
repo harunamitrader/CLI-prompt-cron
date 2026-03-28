@@ -79,11 +79,11 @@ node scripts/create-shortcut.js
 自然言語でジョブを管理できます。プロンプトに `skills/SKILL.md を読んで` を含めてください。
 
 ```
-cli-prompt-cron の skills/SKILL.md を読んで、毎朝9時にGeminiに「GitHubのトレンドをまとめて」と実行するジョブを追加して。
+cli-prompt-cron の skills/SKILL.md を読んで、毎朝9時にGeminiに「GitHubのトレンドをまとめて」というプロンプトを送信するジョブを追加して。
 ```
 
 ```
-cli-prompt-cron の skills/SKILL.md を読んで、毎週月曜8時にCodexに「今週の作業計画を立てて」と実行するジョブを作って。
+cli-prompt-cron の skills/SKILL.md を読んで、毎週月曜8時にCodexに「今週の作業計画を立てて」というプロンプトを送信するジョブを作って。
 ```
 
 ```
