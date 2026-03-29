@@ -64,6 +64,7 @@ function log(tag, message) {
 // ── Shell detection ───────────────────────────────────────────────────────────
 
 const IS_WINDOWS = process.platform === 'win32';
+const TIMEOUT_MS = (parseInt(process.env.JOB_TIMEOUT_MINUTES, 10) || 60) * 60 * 1000;
 
 function shellArgs(command) {
   return IS_WINDOWS
@@ -89,6 +90,16 @@ function runCommand(jobName, command) {
   });
 
   runningChildren.add(child);
+
+  // Auto-kill after timeout
+  const timeout = setTimeout(() => {
+    log(jobName, `TIMEOUT — process exceeded ${TIMEOUT_MS / 60000} minutes, killing…`);
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+    }, 5000);
+  }, TIMEOUT_MS);
+  child.on('close', () => clearTimeout(timeout));
 
   // Write PID to pid file (array of running processes)
   const pidFile = join(PIDS_DIR, `${jobName}.json`);
@@ -374,6 +385,7 @@ log('daemon', `Jobs dir    : ${JOBS_DIR}`);
 log('daemon', `Logs dir    : ${LOGS_DIR}`);
 log('daemon', `Results dir : ${RESULTS_DIR}`);
 log('daemon', `Platform    : ${process.platform}`);
+log('daemon', `Job timeout : ${TIMEOUT_MS / 60000} minutes`);
 log('daemon', '─────────────────────────────────────────');
 
 ensureDirs();
