@@ -2,4 +2,5 @@ node_modules/
 data/
 assets/*.ico
 *.log
+*.txt
 .env

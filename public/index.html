@@ -36,6 +36,16 @@
       color: #4A7FA5;
       letter-spacing: 0.02em;
     }
+    .version-tag {
+      background: #4A7FA5;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 12px;
+      letter-spacing: 0.05em;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    }
     header .subtitle {
       font-size: 11px;
       color: #A0AAB4;
@@ -127,13 +137,19 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
     }
+    .job-card-name:hover { border-bottom-color: #2C3E50; }
     .job-card-schedule {
       font-size: 13px;
       color: #4A7FA5;
       font-weight: 500;
       margin-bottom: 6px;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
     }
+    .job-card-schedule:hover { border-bottom-color: #4A7FA5; }
     .job-card-command {
       font-size: 11px;
       color: #5D6D7E;
@@ -142,7 +158,10 @@
       overflow: hidden;
       text-overflow: ellipsis;
       line-height: 1.4;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
     }
+    .job-card-command:hover { border-bottom-color: #5D6D7E; }
     .job-card-flags {
       font-size: 10px;
       color: #7F8C8D;
@@ -150,7 +169,23 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
     }
+    .job-card-flags:hover { border-bottom-color: #7F8C8D; }
+    .job-edit-input {
+      width: 100%;
+      font-family: inherit;
+      border: 1px solid #4A7FA5;
+      border-radius: 4px;
+      padding: 3px 6px;
+      outline: none;
+      background: #FAFAF7;
+    }
+    .job-edit-input.edit-name { font-size: 14px; color: #2C3E50; font-weight: 600; }
+    .job-edit-input.edit-cron { font-size: 13px; color: #4A7FA5; font-weight: 500; }
+    .job-edit-input.edit-prompt { font-size: 11px; color: #5D6D7E; }
+    .job-edit-input.edit-flags { font-size: 10px; color: #7F8C8D; }
     .job-card-next {
       font-size: 11px;
       color: #95A5A6;
@@ -190,22 +225,77 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
-    .kill-btn {
-      display: inline-block;
+    .running-badge { background: #FDEBD0; color: #CA6F1E; }
+
+    /* ── Running section ── */
+    #running-area {
+      background: #FEF9E7;
+      border-bottom: 1px solid #F0E6C8;
+      flex-shrink: 0;
+      display: block;
+    }
+    #running-scroll {
+      display: flex;
+      gap: 10px;
+      padding: 4px 16px 10px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .running-card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 10px 14px;
+      min-width: 200px;
+      max-width: 300px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      flex-shrink: 0;
+      border: 1px solid #F5D6A0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .running-card-info { flex: 1; min-width: 0; }
+    .running-card-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #2C3E50;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .running-card-elapsed {
+      font-size: 11px;
+      color: #CA6F1E;
+      font-weight: 500;
+    }
+    .running-card-cmd {
+      font-size: 10px;
+      color: #7F8C8D;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .running-kill-btn {
       font-size: 11px;
       font-weight: 600;
-      padding: 4px 12px;
+      padding: 5px 12px;
       border-radius: 6px;
       border: none;
       cursor: pointer;
       background: #E74C3C;
       color: #fff;
-      margin-left: 6px;
+      white-space: nowrap;
       transition: background 0.15s;
+      flex-shrink: 0;
     }
-    .kill-btn:hover { background: #C0392B; }
-    .kill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .running-badge { background: #FDEBD0; color: #CA6F1E; }
+    .running-kill-btn:hover { background: #C0392B; }
+    .running-kill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .running-empty {
+      padding: 12px 0;
+      color: #7F8C8D;
+      font-size: 12px;
+    }
 
     .no-jobs-card {
       padding: 16px;
@@ -367,6 +457,7 @@
 <header>
   <span class="header-icon">🕐</span>
   <h1>cli-prompt-cron</h1>
+  <span class="version-tag">v__APP_VERSION__</span>
   <span class="subtitle">AIスケジューラー</span>
   <div class="header-spacer"></div>
   <div class="live-indicator">
@@ -376,6 +467,12 @@
 </header>
 
 <main>
+  <!-- Running -->
+  <div id="running-area">
+    <div class="section-label">⚡ 実行中</div>
+    <div id="running-scroll"></div>
+  </div>
+
   <!-- Jobs -->
   <div id="jobs-area">
     <div class="section-label">📋 スケジュール一覧</div>
@@ -442,6 +539,8 @@
     if (isNaN(d)) return null;
     const diff = d - Date.now();
     if (diff <= 0) return null;
+    const secs = Math.floor(diff / 1000);
+    if (secs < 60) return `あと ${secs} 秒`;
     const mins = Math.floor(diff / 60000);
     if (mins < 60) return `あと ${mins} 分`;
     const hours = Math.floor(diff / 3600000);
@@ -585,18 +684,17 @@
       const nextLabel = rel ? `<strong>次回:</strong> ${esc(rel)}` : (next ? `<strong>次回:</strong> ${fmt(next)}` : '');
       const btnClass = active ? 'stop' : 'resume';
       const btnLabel = active ? '停止' : '再開';
-      const killBtn = running > 0 ? `<button class="kill-btn" data-job="${esc(job.name)}">強制停止${running > 1 ? ' (' + running + ')' : ''}</button>` : '';
       const cmd = job.command || '';
       const parsed = parseCommand(cmd);
-      return `<div class="job-card">
+      return `<div class="job-card" data-job-name="${esc(job.name)}">
         <div class="job-card-top">${badge}</div>
-        <div class="job-card-name" title="${esc(job.name || job.id || '—')}">${esc(job.name || job.id || '—')}</div>
-        <div class="job-card-schedule">${esc(schedule)}</div>
-        ${parsed.prompt ? `<div class="job-card-command" title="${esc(parsed.prompt)}">${esc(parsed.prompt)}</div>` : ''}
-        ${parsed.flags ? `<div class="job-card-flags" title="${esc(parsed.flags)}">${esc(parsed.flags)}</div>` : ''}
+        <div class="job-card-name" data-field="name" data-raw="${esc(job.name || '')}" title="クリックで編集">${esc(job.name || job.id || '—')}</div>
+        <div class="job-card-schedule" data-field="cron" data-raw="${esc(job.cron || '')}" title="クリックで編集">${esc(schedule)}</div>
+        <div class="job-card-command" data-field="prompt" data-raw="${esc(parsed.prompt)}" title="クリックで編集">${esc(parsed.prompt || '(プロンプト未設定)')}</div>
+        <div class="job-card-flags" data-field="flags" data-raw="${esc(parsed.flags)}" title="クリックで編集">${esc(parsed.flags || '(権限未設定)')}</div>
         ${nextLabel ? `<div class="job-card-next">${nextLabel}</div>` : ''}
         <div class="job-card-actions">
-          <button class="toggle-btn ${btnClass}" data-job="${esc(job.name)}">${btnLabel}</button>${killBtn}
+          <button class="toggle-btn ${btnClass}" data-job="${esc(job.name)}">${btnLabel}</button>
         </div>
       </div>`;
     }).join('');
@@ -604,9 +702,166 @@
     scroll.querySelectorAll('.toggle-btn').forEach(btn => {
       btn.addEventListener('click', () => toggleJob(btn.dataset.job, btn));
     });
-    scroll.querySelectorAll('.kill-btn').forEach(btn => {
+
+    // Wire inline editing
+    scroll.querySelectorAll('[data-field]').forEach(el => {
+      el.addEventListener('click', () => startInlineEdit(el));
+    });
+
+    // Render running section
+    renderRunning(jobs);
+  }
+
+  /* ── Running section ── */
+  let elapsedTimer = null;
+
+  function formatElapsed(ms) {
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec}秒`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}分${sec % 60}秒`;
+    const hr = Math.floor(min / 60);
+    return `${hr}時間${min % 60}分`;
+  }
+
+  function renderRunning(jobs) {
+    const area = document.getElementById('running-area');
+    const scroll = document.getElementById('running-scroll');
+
+    // Collect all running processes across all jobs
+    const running = [];
+    for (const job of jobs) {
+      if (job.runningProcesses && job.runningProcesses.length > 0) {
+        for (const proc of job.runningProcesses) {
+          running.push({ name: job.name, command: job.command, ...proc });
+        }
+      } else if (job.running > 0) {
+        for (let i = 0; i < job.running; i++) {
+          running.push({ name: job.name, command: job.command, pid: null, startedAt: null });
+        }
+      }
+    }
+
+    area.style.display = 'block';
+    if (running.length === 0) {
+      scroll.innerHTML = '<div class="running-empty">実行中のジョブはありません</div>';
+      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+      return;
+    }
+
+    scroll.innerHTML = running.map((r, i) => {
+      const elapsed = r.startedAt ? Date.now() - new Date(r.startedAt).getTime() : null;
+      const elapsedLabel = elapsed === null ? '稼働中' : formatElapsed(elapsed);
+      const parsed = parseCommand(r.command || '');
+      const cmdDisplay = parsed.prompt || r.command || '';
+      return `<div class="running-card">
+        <div class="running-card-info">
+          <div class="running-card-name">${esc(r.name)}</div>
+          <div class="running-card-elapsed" data-started="${esc(r.startedAt || '')}">${elapsedLabel}</div>
+          <div class="running-card-cmd" title="${esc(cmdDisplay)}">${esc(cmdDisplay)}</div>
+        </div>
+        <button class="running-kill-btn" data-job="${esc(r.name)}">強制停止</button>
+      </div>`;
+    }).join('');
+
+    // Wire kill buttons
+    scroll.querySelectorAll('.running-kill-btn').forEach(btn => {
       btn.addEventListener('click', () => killProcess(btn.dataset.job, btn));
     });
+
+    // Update elapsed time every second
+    if (elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(() => {
+      scroll.querySelectorAll('.running-card-elapsed').forEach(el => {
+        const started = el.dataset.started;
+        if (started) {
+          el.textContent = formatElapsed(Date.now() - new Date(started).getTime());
+        }
+      });
+    }, 1000);
+  }
+
+  /* ── Inline editing ── */
+  function startInlineEdit(el) {
+    if (el.querySelector('input')) return; // already editing
+    const field = el.dataset.field;
+    const raw = el.dataset.raw || '';
+    const card = el.closest('.job-card');
+    const jobName = card.dataset.jobName;
+
+    const cssClasses = { name: 'edit-name', cron: 'edit-cron', prompt: 'edit-prompt', flags: 'edit-flags' };
+    const placeholders = { name: 'ジョブ名', cron: '例: 0 9 * * *', prompt: 'プロンプトを入力', flags: '例: --full-auto' };
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'job-edit-input ' + (cssClasses[field] || '');
+    input.value = raw;
+    input.placeholder = placeholders[field] || '';
+
+    el.textContent = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+    editing = true;
+
+    function cancel() {
+      editing = false;
+      input.removeEventListener('blur', onBlur);
+      fetchJobs();
+    }
+
+    async function save() {
+      editing = false;
+      input.removeEventListener('blur', onBlur);
+      const newVal = input.value.trim();
+      if (!newVal || newVal === raw) { cancel(); return; }
+
+      if (field === 'name') {
+        const res = await patchJob(jobName, { name: newVal });
+        if (res && !res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.error || 'リネーム失敗');
+        }
+      } else if (field === 'cron') {
+        await patchJob(jobName, { cron: newVal });
+      } else {
+        // Get current full command from API
+        const jobs = await fetch('/api/jobs').then(r => r.json());
+        const jobData = jobs.find(j => j.name === jobName);
+        const origCmd = jobData?.command || '';
+
+        // Extract base command (e.g. "codex exec") — everything before first flag or quote
+        const baseMatch = origCmd.match(/^(.*?)(?=\s+--|\s+['"])/);
+        const base = baseMatch ? baseMatch[1].trim() : origCmd.split(/\s*['"][^'"]*['"]\s*$/)[0].trim();
+
+        const promptEl = card.querySelector('[data-field="prompt"]');
+        const flagsEl = card.querySelector('[data-field="flags"]');
+        const newPrompt = field === 'prompt' ? newVal : (promptEl?.dataset.raw || '');
+        const newFlags = field === 'flags' ? newVal : (flagsEl?.dataset.raw || '');
+
+        const parts = [base];
+        if (newFlags) parts.push(newFlags);
+        if (newPrompt) parts.push(`'${newPrompt}'`);
+        await patchJob(jobName, { command: parts.join(' ') });
+      }
+      fetchJobs();
+    }
+
+    function onBlur() { save(); }
+    input.addEventListener('blur', onBlur);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+  }
+
+  async function patchJob(name, updates) {
+    try {
+      return await fetch('/api/jobs/' + encodeURIComponent(name), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+    } catch (_) { return null; }
   }
 
   async function toggleJob(name, btn) {
@@ -641,8 +896,9 @@
     } catch (_) {}
   }
 
+  let editing = false;
   fetchJobs();
-  setInterval(fetchJobs, 5000);
+  setInterval(() => { if (!editing) fetchJobs(); }, 5000);
 
   /* ── Live Log (SSE) ── */
   const MAX_LINES = 200;
@@ -670,9 +926,39 @@
     logPane.scrollTop = logPane.scrollHeight;
   }
 
+  /* ── Desktop notification ── */
+  let notifPermission = Notification.permission;
+  if (notifPermission === 'default') {
+    Notification.requestPermission().then(p => { notifPermission = p; });
+  }
+
+  async function notifyResult(jobName, filename) {
+    if (notifPermission !== 'granted') return;
+    let body = '';
+    try {
+      const res = await fetch('/api/results/' + encodeURIComponent(filename));
+      if (res.ok) {
+        const text = await res.text();
+        body = text.slice(0, 300) + (text.length > 300 ? '…' : '');
+      }
+    } catch { /* ignore */ }
+    const n = new Notification(`✅ ${jobName} 完了`, {
+      body: body || '実行結果を確認してください',
+      icon: '🕐',
+      tag: filename,
+    });
+    n.onclick = () => { window.focus(); openResult(filename); n.close(); };
+  }
+
   function connectSSE() {
     const es = new EventSource('/api/logs/stream');
-    es.onmessage = e => { if (e.data) appendLog(e.data); };
+    es.onmessage = e => {
+      if (!e.data) return;
+      appendLog(e.data);
+      // Detect result saved → desktop notification
+      const m = e.data.match(/\[([^\]]+)\] Result saved → (.+)$/);
+      if (m) notifyResult(m[1], m[2].trim());
+    };
     es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
   }
   connectSSE();

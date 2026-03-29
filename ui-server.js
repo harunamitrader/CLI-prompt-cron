@@ -14,9 +14,10 @@
 
 import http from 'node:http';
 import fs, { watchFile, unwatchFile } from 'node:fs';
-import { readFileSync, readdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,14 @@ const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');
 const PIDS_DIR    = join(BASE_DIR, 'pids');
 const PUBLIC_DIR  = join(__dirname, 'public');
+const APP_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 const PORT = Number(process.env.PORT) || 3300;
 
@@ -88,13 +97,62 @@ function sendJSON(res, status, data) {
   res.end(body);
 }
 
+/**
+ * Append a line to today's log file (shared with daemon).
+ * @param {string} tag
+ * @param {string} message
+ */
+function appendLog(tag, message) {
+  const ts   = new Date().toISOString();
+  const line = `[${ts}] [${tag}] ${message}\n`;
+  try { appendFileSync(todayLogPath(), line, 'utf8'); } catch { /* ignore */ }
+}
+
+/**
+ * Check whether a PID is still alive.
+ * Treat EPERM as alive (e.g., on Windows when permission is denied).
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err && err.code === 'EPERM';
+  }
+}
+
+/**
+ * Best-effort kill of a PID (and its children on Windows).
+ * @param {number} pid
+ * @returns {boolean} whether a kill command was issued
+ */
+function killProcessTree(pid) {
+  if (!pid || Number.isNaN(pid)) return false;
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  let sent = false;
+  try { process.kill(pid, 'SIGTERM'); sent = true; } catch (err) { if (err.code !== 'ESRCH') return false; }
+  setTimeout(() => {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+  }, 1000);
+  return sent;
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 /** GET / — serve public/index.html */
 function handleIndex(res) {
   const indexPath = join(PUBLIC_DIR, 'index.html');
   try {
-    const html = readFileSync(indexPath, 'utf8');
+    const html = readFileSync(indexPath, 'utf8').replace(/__APP_VERSION__/g, APP_VERSION);
     sendHeaders(res, 200, 'text/html; charset=utf-8');
     res.end(html);
   } catch {
@@ -119,13 +177,17 @@ function handleJobs(res) {
       const job = JSON.parse(raw);
       // Check if any processes are currently running
       let running = 0;
+      const runningProcesses = [];
       try {
         const pidPath = join(PIDS_DIR, `${name}.json`);
         if (existsSync(pidPath)) {
           const pids = JSON.parse(readFileSync(pidPath, 'utf8'));
           const arr = Array.isArray(pids) ? pids : [pids];
           for (const p of arr) {
-            try { process.kill(p.pid, 0); running++; } catch { /* dead */ }
+            if (isProcessAlive(p.pid)) {
+              running++;
+              runningProcesses.push({ pid: p.pid, startedAt: p.startedAt, command: p.command });
+            }
           }
         }
       } catch { /* not running */ }
@@ -136,6 +198,7 @@ function handleJobs(res) {
         timezone: job.timezone ?? null,
         active:   job.active   !== false,
         running,
+        runningProcesses,
       };
     } catch {
       return { name, error: 'parse error' };
@@ -212,27 +275,81 @@ function handleResultFile(res, filename) {
   }
 }
 
-/** PATCH /api/jobs/:name — toggle active field */
-function handleToggleJob(req, res, jobName) {
+/** PATCH /api/jobs/:name — update job fields or toggle active */
+function handleUpdateJob(req, res, jobName) {
   if (jobName.includes('..') || jobName.includes('/') || jobName.includes('\\')) {
     sendJSON(res, 400, { error: 'invalid job name' });
     return;
   }
 
   const filePath = join(JOBS_DIR, `${jobName}.json`);
-  try {
-    const raw = readFileSync(filePath, 'utf8');
-    const job = JSON.parse(raw);
-    job.active = job.active === false ? true : false;
-    writeFileSync(filePath, JSON.stringify(job, null, 2) + '\n', 'utf8');
-    sendJSON(res, 200, { name: jobName, active: job.active });
-  } catch (err) {
-    if (err.code === 'ENOENT') {
-      sendJSON(res, 404, { error: 'job not found' });
-    } else {
-      sendJSON(res, 500, { error: 'failed to update job' });
+
+  // Collect request body
+  let body = '';
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', () => {
+    try {
+      const raw = readFileSync(filePath, 'utf8');
+      const job = JSON.parse(raw);
+
+      if (body) {
+        // Body present → update specified fields
+        const updates = JSON.parse(body);
+        const allowed = ['cron', 'command', 'timezone', 'active'];
+        for (const key of allowed) {
+          if (key in updates) job[key] = updates[key];
+        }
+
+        // Handle rename
+        if (updates.name && updates.name !== jobName) {
+          const newName = updates.name;
+          if (newName.includes('..') || newName.includes('/') || newName.includes('\\') || !newName.trim()) {
+            sendJSON(res, 400, { error: 'invalid new name' });
+            return;
+          }
+          // Block rename if running
+          const pidPath = join(PIDS_DIR, `${jobName}.json`);
+          if (existsSync(pidPath)) {
+            try {
+              const pids = JSON.parse(readFileSync(pidPath, 'utf8'));
+              const arr = Array.isArray(pids) ? pids : [pids];
+              for (const p of arr) {
+                if (isProcessAlive(p.pid)) {
+                  sendJSON(res, 409, { error: 'cannot rename while job is running' });
+                  return;
+                }
+              }
+            } catch { /* no running process */ }
+          }
+          const newFilePath = join(JOBS_DIR, `${newName}.json`);
+          if (existsSync(newFilePath)) {
+            sendJSON(res, 409, { error: 'job name already exists' });
+            return;
+          }
+          writeFileSync(newFilePath, JSON.stringify(job, null, 2) + '\n', 'utf8');
+          try { unlinkSync(filePath); } catch { /* ignore */ }
+          // Rename PID file if exists
+          if (existsSync(pidPath)) {
+            try { fs.renameSync(pidPath, join(PIDS_DIR, `${newName}.json`)); } catch { /* ignore */ }
+          }
+          sendJSON(res, 200, { name: newName, ...job });
+          return;
+        }
+      } else {
+        // No body → toggle active (backwards compat)
+        job.active = job.active === false ? true : false;
+      }
+
+      writeFileSync(filePath, JSON.stringify(job, null, 2) + '\n', 'utf8');
+      sendJSON(res, 200, { name: jobName, ...job });
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        sendJSON(res, 404, { error: 'job not found' });
+      } else {
+        sendJSON(res, 500, { error: 'failed to update job' });
+      }
     }
-  }
+  });
 }
 
 /** DELETE /api/running/:name — kill all running processes for a job */
@@ -248,21 +365,24 @@ function handleKillProcess(res, jobName) {
     const pids = Array.isArray(raw) ? raw : [raw];
     const killed = [];
     for (const p of pids) {
-      try {
-        process.kill(p.pid, 'SIGTERM');
+      if (killProcessTree(p.pid)) {
         killed.push(p.pid);
-      } catch { /* already dead */ }
-    }
-    // Force kill survivors after 3 seconds
-    setTimeout(() => {
-      for (const pid of killed) {
-        try {
-          process.kill(pid, 0);
-          process.kill(pid, 'SIGKILL');
-        } catch { /* already dead */ }
       }
-    }, 3000);
-    sendJSON(res, 200, { name: jobName, killed: true, pids: killed, count: killed.length });
+    }
+
+    if (killed.length > 0) {
+      try {
+        const remaining = pids.filter((p) => !killed.includes(p.pid));
+        if (remaining.length > 0) {
+          writeFileSync(pidPath, JSON.stringify(remaining) + '\n', 'utf8');
+        } else {
+          unlinkSync(pidPath);
+        }
+      } catch { /* best-effort cleanup */ }
+      appendLog('ui', `KILL job=${jobName} pids=${killed.join(',')}`);
+    }
+
+    sendJSON(res, 200, { name: jobName, killed: killed.length > 0, pids: killed, count: killed.length });
   } catch (err) {
     if (err.code === 'ENOENT') {
       sendJSON(res, 404, { error: 'no running process for this job' });
@@ -404,7 +524,7 @@ function router(req, res) {
   if (req.method === 'PATCH') {
     const jobMatch = pathname.match(/^\/api\/jobs\/(.+)$/);
     if (jobMatch) {
-      handleToggleJob(req, res, decodeURIComponent(jobMatch[1]));
+      handleUpdateJob(req, res, decodeURIComponent(jobMatch[1]));
       return;
     }
     sendJSON(res, 404, { error: 'not found' });
