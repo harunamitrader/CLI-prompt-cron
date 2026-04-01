@@ -20,7 +20,7 @@ import {
   existsSync,
   unlinkSync,
 } from 'node:fs';
-import { join, basename, dirname } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -31,6 +31,8 @@ const JOBS_DIR    = join(BASE_DIR, 'jobs');
 const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');
 const PIDS_DIR    = join(BASE_DIR, 'pids');
+const SETTINGS_PATH = join(BASE_DIR, 'settings.json');
+const FALLBACK_WORKDIR = process.env.CLI_PROMPT_CRON_WORKDIR || resolve(__dirname, '..', '..', '..', '..');
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -70,6 +72,48 @@ function shellArgs(command) {
   return IS_WINDOWS
     ? ['powershell', ['-Command', command]] // cmd /c mangles double-quoted args
     : ['sh',  ['-c', command]];
+}
+
+function loadSettings() {
+  try {
+    if (!existsSync(SETTINGS_PATH)) {
+      return { defaultWorkdir: FALLBACK_WORKDIR };
+    }
+    const raw = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
+    const defaultWorkdir = typeof raw.defaultWorkdir === 'string' && raw.defaultWorkdir.trim()
+      ? raw.defaultWorkdir.trim()
+      : FALLBACK_WORKDIR;
+    return { defaultWorkdir };
+  } catch {
+    return { defaultWorkdir: FALLBACK_WORKDIR };
+  }
+}
+
+function isValidLogId(value) {
+  return /^\d{4}$/.test(String(value || '').trim());
+}
+
+function hasDuplicateLogId(currentFilePath, logId) {
+  let files = [];
+  try {
+    files = readdirSync(JOBS_DIR).filter((f) => f.endsWith('.json'));
+  } catch {
+    return false;
+  }
+
+  for (const filename of files) {
+    const fullPath = join(JOBS_DIR, filename);
+    if (fullPath === currentFilePath) continue;
+    try {
+      const raw = JSON.parse(readFileSync(fullPath, 'utf8'));
+      const otherLogId = typeof raw.logId === 'string' ? raw.logId.trim() : '';
+      if (otherLogId === logId) return true;
+    } catch {
+      /* ignore broken files */
+    }
+  }
+
+  return false;
 }
 
 function normalizeTargetCli(value) {
@@ -169,12 +213,16 @@ function buildCommand(targetCli, permissionProfile, prompt) {
  * @param {string} command
  */
 function runCommand(jobName, logTag, command) {
+  const settings = loadSettings();
+  const workdir = settings.defaultWorkdir;
   log(logTag, `FIRE → ${command}`);
+  log(logTag, `CWD  → ${workdir}`);
 
   const [bin, args] = shellArgs(command);
   const child = spawn(bin, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
+    cwd: workdir,
   });
 
   runningChildren.add(child);
@@ -312,10 +360,27 @@ function parseJob(filePath) {
     return null;
   }
 
+  const settings = loadSettings();
+  if (!existsSync(settings.defaultWorkdir)) {
+    log('daemon', `Configured default workdir was not found: ${settings.defaultWorkdir}`);
+    return null;
+  }
+
   const name = basename(filePath, '.json');
+  const logId = typeof job.logId === 'string' ? job.logId.trim() : '';
+  if (!isValidLogId(logId)) {
+    log('daemon', `Missing or invalid "logId" field in ${filePath}; expected a unique 4-digit number`);
+    return null;
+  }
+
+  if (hasDuplicateLogId(filePath, logId)) {
+    log('daemon', `Duplicate "logId" value "${logId}" in ${filePath}`);
+    return null;
+  }
+
   return {
     name,
-    logId:    typeof job.logId === 'string' && job.logId.trim() ? job.logId.trim() : name,
+    logId,
     targetCli,
     permissionProfile,
     prompt,
@@ -357,7 +422,7 @@ function registerJob(filePath) {
   }
 
   tasks.set(job.name, task);
-  log('daemon', `Job "${job.name}" scheduled — cron="${job.cron}"${job.timezone ? ` tz=${job.timezone}` : ''}`);
+  log('daemon', `Job "${job.name}" scheduled — cron="${job.cron}"${job.timezone ? ` tz=${job.timezone}` : ''} cwd="${loadSettings().defaultWorkdir}"`);
 }
 
 /**

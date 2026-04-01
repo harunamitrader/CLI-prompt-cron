@@ -4,6 +4,7 @@
 
 あなたの仕事は `data/jobs/` 内の JSON ファイルを作成・編集・削除することだけです。
 コマンドの実行、ログの記録、結果の保存はすべてデーモンが自動で行います。あなたが関与する必要はありません。
+公開用サンプルが必要な場合は `examples/job.sample.json` を参照してください。
 
 **やっていいこと:**
 - `data/jobs/` 内の JSON ファイルの作成・編集・削除
@@ -40,6 +41,7 @@
 
 ```json
 {
+  "logId": "0001",
   "targetCli": "gemini",
   "permissionProfile": "safe",
   "prompt": "ユーザーが指定したプロンプト",
@@ -51,6 +53,7 @@
 
 | フィールド  | 型      | 必須 | 説明 |
 |------------|---------|------|------|
+| `logId` | string | ✓ | `0000`〜`9999` の4桁数字。既存ジョブと重複不可 |
 | `targetCli` | string | ✓ | `gemini` / `claude` / `codex` |
 | `permissionProfile` | string |      | `safe` / `edit` / `plan` / `full`。未指定時は `safe` |
 | `prompt`   | string  | ✓    | ユーザーに送る本文 |
@@ -72,6 +75,7 @@ CLI コマンドは JSON に直接保存しません。`targetCli` と `permissi
 
 ```json
 {
+  "logId": "0001",
   "targetCli": "gemini",
   "permissionProfile": "safe",
   "prompt": "ニュースまとめて",
@@ -96,6 +100,13 @@ CLI コマンドは JSON に直接保存しません。`targetCli` と `permissi
 権限指定がない場合の既定値:
 - safe
 ```
+
+### `logId` のルール
+
+- すべてのジョブ JSON に `logId` が必要です
+- `logId` は `0000`〜`9999` の4桁数字だけを使ってください
+- 3桁以下、5桁以上、英字や記号を含む値は無効です
+- 既存ジョブと同じ `logId` は使えません
 
 ---
 

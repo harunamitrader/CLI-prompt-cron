@@ -59,6 +59,51 @@
       font-size: 11px;
       color: #7F8C8D;
     }
+    .default-workdir-bar {
+      background: #fff;
+      border-bottom: 1px solid #E4DFD6;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .default-workdir-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #7F8C8D;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    .default-workdir-value {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      color: #2C3E50;
+      background: #FAFAF7;
+      border: 1px solid #E4DFD6;
+      border-radius: 8px;
+      padding: 7px 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+    .default-workdir-value:hover { border-color: #4A7FA5; }
+    .default-workdir-save {
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      background: #4A7FA5;
+      border: none;
+      border-radius: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    .default-workdir-save:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .live-dot {
       width: 7px;
       height: 7px;
@@ -268,6 +313,9 @@
 
     .job-card-actions {
       margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
     .toggle-btn {
       display: inline-block;
@@ -296,6 +344,26 @@
       color: #fff;
     }
     .toggle-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .delete-btn {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      background: #FDEDEC;
+      color: #C0392B;
+    }
+    .delete-btn:hover {
+      background: #F5B7B1;
+      color: #fff;
+    }
+    .delete-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
@@ -563,6 +631,12 @@
     <span>ライブ</span>
   </div>
 </header>
+
+<div class="default-workdir-bar">
+  <span class="default-workdir-label">Default CWD</span>
+  <input id="default-workdir-input" class="default-workdir-value" type="text" placeholder="C:\path\to\your\workspace" />
+  <button id="default-workdir-save" class="default-workdir-save">保存</button>
+</div>
 
 <main>
   <!-- Running -->
@@ -936,12 +1010,13 @@
       }
       const targetCli = normalizeTargetCli(job.targetCli || detectTargetCli(cmd) || job.tool) || 'gemini';
       const permissionProfile = inferPermissionProfile(targetCli, cmd, job.permissionProfile);
-      const logId = job.logId || job.name || '';
+      const logId = job.logId || '';
+      const logIdDisplay = logId || '未設定';
       return `<div class="job-card" data-job-name="${esc(job.name)}">
         <div class="job-card-top">${badge}</div>
         <div class="job-card-name" data-field="name" data-raw="${esc(job.name || '')}" title="クリックで編集">${esc(job.name || job.id || '—')}</div>
         <div class="job-card-meta">
-          <div class="job-card-logid" data-field="logId" data-raw="${esc(logId)}" title="クリックで編集">logID: ${esc(logId)}</div>
+          <div class="job-card-logid" data-field="logId" data-raw="${esc(logId)}" title="クリックで編集">logID: ${esc(logIdDisplay)}</div>
           <div class="job-card-tool" data-field="targetCli" data-raw="${esc(targetCli)}" title="クリックで編集">${esc(targetCli)}</div>
           <div class="job-card-profile" data-field="permissionProfile" data-raw="${esc(permissionProfile)}" title="クリックで編集">${esc(permissionLabel(permissionProfile))}</div>
         </div>
@@ -950,12 +1025,16 @@
         ${nextLabel ? `<div class="job-card-next">${nextLabel}</div>` : ''}
         <div class="job-card-actions">
           <button class="toggle-btn ${btnClass}" data-job="${esc(job.name)}">${btnLabel}</button>
+          <button class="delete-btn" data-job="${esc(job.name)}">削除</button>
         </div>
       </div>`;
     }).join('');
 
     scroll.querySelectorAll('.toggle-btn').forEach(btn => {
       btn.addEventListener('click', () => toggleJob(btn.dataset.job, btn));
+    });
+    scroll.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteJob(btn.dataset.job, btn));
     });
 
     // Wire inline editing
@@ -1037,6 +1116,10 @@
   }
 
   /* ── Inline editing ── */
+  function isValidLogId(value) {
+    return /^\d{4}$/.test(String(value || '').trim());
+  }
+
   function startInlineEdit(el) {
     if (el.querySelector('input, textarea, select')) return; // already editing
     const field = el.dataset.field;
@@ -1045,7 +1128,7 @@
     const jobName = card.dataset.jobName;
 
     const cssClasses = { name: 'edit-name', logId: 'edit-logid', cron: 'edit-cron', prompt: 'edit-prompt' };
-    const placeholders = { name: 'ジョブ名', logId: '例: 001', cron: '例: 0 9 * * *', prompt: 'プロンプトを入力' };
+    const placeholders = { name: 'ジョブ名', logId: '例: 0001', cron: '例: 0 9 * * *', prompt: 'プロンプトを入力' };
     const isPromptField = field === 'prompt';
     const isSelectField = field === 'targetCli' || field === 'permissionProfile';
     const input = isSelectField ? document.createElement('select') : (isPromptField ? document.createElement('textarea') : document.createElement('input'));
@@ -1103,7 +1186,16 @@
           alert(err.error || 'リネーム失敗');
         }
       } else if (field === 'logId') {
-        await patchJob(jobName, { logId: newVal });
+        if (!isValidLogId(newVal)) {
+          alert('logId は 4 桁の数字で入力してください');
+          cancel();
+          return;
+        }
+        const res = await patchJob(jobName, { logId: newVal });
+        if (res && !res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.error || 'logId の更新に失敗しました');
+        }
       } else if (field === 'cron') {
         await patchJob(jobName, { cron: newVal });
       } else if (field === 'prompt') {
@@ -1166,6 +1258,23 @@
     btn.disabled = false;
   }
 
+  async function deleteJob(name, btn) {
+    if (!confirm(`「${name}」のジョブを削除しますか？\nこの操作は元に戻せません。`)) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/jobs/' + encodeURIComponent(name), { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || '削除に失敗しました');
+      } else {
+        await fetchJobs();
+      }
+    } catch (_) {
+      alert('削除に失敗しました');
+    }
+    btn.disabled = false;
+  }
+
   async function fetchJobs() {
     try {
       const res = await fetch('/api/jobs');
@@ -1176,6 +1285,48 @@
   }
 
   let editing = false;
+  const defaultWorkdirInput = document.getElementById('default-workdir-input');
+  const defaultWorkdirSave = document.getElementById('default-workdir-save');
+
+  async function fetchSettings() {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      defaultWorkdirInput.value = data.defaultWorkdir || '';
+      defaultWorkdirInput.dataset.originalValue = data.defaultWorkdir || '';
+    } catch (_) {}
+  }
+
+  async function saveSettings() {
+    const value = defaultWorkdirInput.value.trim();
+    if (!value) return;
+    defaultWorkdirSave.disabled = true;
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultWorkdir: value }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        defaultWorkdirInput.value = data.defaultWorkdir || value;
+        defaultWorkdirInput.dataset.originalValue = data.defaultWorkdir || value;
+        await fetchJobs();
+      }
+    } catch (_) {}
+    defaultWorkdirSave.disabled = false;
+  }
+
+  defaultWorkdirSave.addEventListener('click', saveSettings);
+  defaultWorkdirInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveSettings();
+    }
+  });
+
+  fetchSettings();
   fetchJobs();
   setInterval(() => { if (!editing) fetchJobs(); }, 5000);
 

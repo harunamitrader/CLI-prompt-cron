@@ -15,7 +15,7 @@
 import http from 'node:http';
 import fs, { watchFile, unwatchFile } from 'node:fs';
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
-import { join, basename, dirname } from 'node:path';
+import { join, basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
@@ -28,6 +28,8 @@ const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');
 const PIDS_DIR    = join(BASE_DIR, 'pids');
 const PUBLIC_DIR  = join(__dirname, 'public');
+const SETTINGS_PATH = join(BASE_DIR, 'settings.json');
+const FALLBACK_WORKDIR = process.env.CLI_PROMPT_CRON_WORKDIR || resolve(__dirname, '..', '..', '..', '..');
 const APP_VERSION = (() => {
   try {
     const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
@@ -95,6 +97,59 @@ function sendJSON(res, status, data) {
   const body = JSON.stringify(data);
   sendHeaders(res, status, 'application/json; charset=utf-8');
   res.end(body);
+}
+
+function loadSettings() {
+  try {
+    if (!existsSync(SETTINGS_PATH)) {
+      return { defaultWorkdir: FALLBACK_WORKDIR };
+    }
+    const raw = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
+    const defaultWorkdir = typeof raw.defaultWorkdir === 'string' && raw.defaultWorkdir.trim()
+      ? raw.defaultWorkdir.trim()
+      : FALLBACK_WORKDIR;
+    return { defaultWorkdir };
+  } catch {
+    return { defaultWorkdir: FALLBACK_WORKDIR };
+  }
+}
+
+function saveSettings(settings) {
+  const normalized = {
+    defaultWorkdir: typeof settings.defaultWorkdir === 'string' && settings.defaultWorkdir.trim()
+      ? settings.defaultWorkdir.trim()
+      : FALLBACK_WORKDIR,
+  };
+  writeFileSync(SETTINGS_PATH, JSON.stringify(normalized, null, 2) + '\n', 'utf8');
+  return normalized;
+}
+
+function isValidLogId(value) {
+  return /^\d{4}$/.test(String(value || '').trim());
+}
+
+function collectOtherLogIds(currentJobName) {
+  const ids = new Set();
+  let files = [];
+  try {
+    files = readdirSync(JOBS_DIR).filter((f) => f.endsWith('.json'));
+  } catch {
+    return ids;
+  }
+
+  for (const filename of files) {
+    const name = basename(filename, '.json');
+    if (name === currentJobName) continue;
+    try {
+      const raw = JSON.parse(readFileSync(join(JOBS_DIR, filename), 'utf8'));
+      const logId = typeof raw.logId === 'string' ? raw.logId.trim() : '';
+      if (isValidLogId(logId)) ids.add(logId);
+    } catch {
+      /* ignore broken job files */
+    }
+  }
+
+  return ids;
 }
 
 /**
@@ -286,6 +341,7 @@ function handleIndex(res) {
 
 /** GET /api/jobs — list all job definitions */
 function handleJobs(res) {
+  const settings = loadSettings();
   let files = [];
   try {
     files = readdirSync(JOBS_DIR).filter((f) => f.endsWith('.json'));
@@ -324,7 +380,7 @@ function handleJobs(res) {
       } catch { /* not running */ }
       return {
         name,
-        logId:    typeof job.logId === 'string' && job.logId.trim() ? job.logId.trim() : name,
+        logId:    typeof job.logId === 'string' && job.logId.trim() ? job.logId.trim() : '',
         targetCli,
         permissionProfile,
         cron:     job.cron     ?? null,
@@ -336,6 +392,7 @@ function handleJobs(res) {
         active:   job.active   !== false,
         running,
         runningProcesses,
+        defaultWorkdir: settings.defaultWorkdir,
       };
     } catch {
       return { name, error: 'parse error' };
@@ -343,6 +400,26 @@ function handleJobs(res) {
   });
 
   sendJSON(res, 200, jobs);
+}
+
+function handleGetSettings(res) {
+  sendJSON(res, 200, loadSettings());
+}
+
+function handleUpdateSettings(req, res) {
+  let body = '';
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', () => {
+    try {
+      const updates = body ? JSON.parse(body) : {};
+      const next = saveSettings({
+        defaultWorkdir: updates.defaultWorkdir,
+      });
+      sendJSON(res, 200, next);
+    } catch {
+      sendJSON(res, 500, { error: 'failed to update settings' });
+    }
+  });
 }
 
 /** GET /api/results — list recent result files (newest first, max 50) */
@@ -436,7 +513,19 @@ function handleUpdateJob(req, res, jobName) {
         for (const key of allowed) {
           if (key in updates) job[key] = updates[key];
         }
+        delete job.workdir;
         delete job.command;
+
+        const logId = typeof job.logId === 'string' ? job.logId.trim() : '';
+        if (!isValidLogId(logId)) {
+          sendJSON(res, 400, { error: 'logId must be a unique 4-digit number' });
+          return;
+        }
+        if (collectOtherLogIds(jobName).has(logId)) {
+          sendJSON(res, 409, { error: 'logId already exists' });
+          return;
+        }
+        job.logId = logId;
 
         const targetCli = normalizeTargetCli(job.targetCli || '') || inferTargetCli(job.command) || 'gemini';
         const permissionProfile = inferPermissionProfile(targetCli, '', job.permissionProfile);
@@ -531,6 +620,43 @@ function handleKillProcess(res, jobName) {
       sendJSON(res, 404, { error: 'no running process for this job' });
     } else {
       sendJSON(res, 500, { error: 'failed to kill process' });
+    }
+  }
+}
+
+/** DELETE /api/jobs/:name — delete a job file when not running */
+function handleDeleteJob(res, jobName) {
+  if (jobName.includes('..') || jobName.includes('/') || jobName.includes('\\')) {
+    sendJSON(res, 400, { error: 'invalid job name' });
+    return;
+  }
+
+  const filePath = join(JOBS_DIR, `${jobName}.json`);
+  const pidPath = join(PIDS_DIR, `${jobName}.json`);
+
+  try {
+    if (existsSync(pidPath)) {
+      try {
+        const raw = JSON.parse(readFileSync(pidPath, 'utf8'));
+        const arr = Array.isArray(raw) ? raw : [raw];
+        for (const p of arr) {
+          if (isProcessAlive(p.pid)) {
+            sendJSON(res, 409, { error: 'cannot delete while job is running' });
+            return;
+          }
+        }
+      } catch { /* ignore broken pid file */ }
+    }
+
+    unlinkSync(filePath);
+    try { if (existsSync(pidPath)) unlinkSync(pidPath); } catch { /* ignore */ }
+    appendLog('ui', `DELETE job=${jobName}`);
+    sendJSON(res, 200, { name: jobName, deleted: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      sendJSON(res, 404, { error: 'job not found' });
+    } else {
+      sendJSON(res, 500, { error: 'failed to delete job' });
     }
   }
 }
@@ -665,6 +791,10 @@ function router(req, res) {
 
   // PATCH /api/jobs/:name — toggle active
   if (req.method === 'PATCH') {
+    if (pathname === '/api/settings') {
+      handleUpdateSettings(req, res);
+      return;
+    }
     const jobMatch = pathname.match(/^\/api\/jobs\/(.+)$/);
     if (jobMatch) {
       handleUpdateJob(req, res, decodeURIComponent(jobMatch[1]));
@@ -679,6 +809,11 @@ function router(req, res) {
     const runMatch = pathname.match(/^\/api\/running\/(.+)$/);
     if (runMatch) {
       handleKillProcess(res, decodeURIComponent(runMatch[1]));
+      return;
+    }
+    const jobMatch = pathname.match(/^\/api\/jobs\/(.+)$/);
+    if (jobMatch) {
+      handleDeleteJob(res, decodeURIComponent(jobMatch[1]));
       return;
     }
     sendJSON(res, 404, { error: 'not found' });
@@ -697,6 +832,11 @@ function router(req, res) {
 
   if (pathname === '/api/jobs') {
     handleJobs(res);
+    return;
+  }
+
+  if (pathname === '/api/settings') {
+    handleGetSettings(res);
     return;
   }
 
