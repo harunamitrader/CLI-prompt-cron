@@ -16,7 +16,7 @@
 - コマンドの最適化や独自の工夫
 - `data/jobs/` 以外へのファイル書き込み
 
-ユーザーの指示はそのまま `command` フィールドに入れてください。デーモンがシェル経由で実行します。
+ユーザーの指示本文は `prompt` フィールドに入れてください。実際の CLI コマンドはデーモンが `targetCli` と `permissionProfile` から組み立てます。
 
 ---
 
@@ -40,8 +40,10 @@
 
 ```json
 {
+  "targetCli": "gemini",
+  "permissionProfile": "safe",
+  "prompt": "ユーザーが指定したプロンプト",
   "cron": "0 9 * * *",
-  "command": "gemini -p 'ユーザーが指定したプロンプト'",
   "timezone": "Asia/Tokyo",
   "active": true
 }
@@ -49,60 +51,50 @@
 
 | フィールド  | 型      | 必須 | 説明 |
 |------------|---------|------|------|
+| `targetCli` | string | ✓ | `gemini` / `claude` / `codex` |
+| `permissionProfile` | string |      | `safe` / `edit` / `plan` / `full`。未指定時は `safe` |
+| `prompt`   | string  | ✓    | ユーザーに送る本文 |
 | `cron`     | string  | ✓    | cron 式（5フィールド形式） |
-| `command`  | string  | ✓    | シェルコマンド（デーモンがそのまま実行する） |
 | `timezone` | string  |      | タイムゾーン（省略時は `Asia/Tokyo` を推奨） |
 | `active`   | boolean |      | `false` で一時停止（デフォルト: `true`） |
 
-### command の組み立て方
+### コマンドの組み立て
 
-ユーザーの指示をそのまま CLI コマンドにしてください。余計な加工はしないこと。
+CLI コマンドは JSON に直接保存しません。`targetCli` と `permissionProfile` からデーモンが自動生成します。
 
 | CLI | コマンド形式 |
 |-----|-------------|
-| Gemini CLI | `gemini -p 'プロンプト'` |
-| Codex | `codex exec 'プロンプト'` |
-| Claude Code | `claude -p 'プロンプト'` |
+| Gemini CLI | `gemini ... -p 'プロンプト'` |
+| Codex | `codex exec ... 'プロンプト'` |
+| Claude Code | `claude --permission-mode ... -p 'プロンプト'` |
 
 **例:** ユーザーが「毎朝9時にGeminiに『ニュースまとめて』と送って」と言ったら：
 
 ```json
 {
+  "targetCli": "gemini",
+  "permissionProfile": "safe",
+  "prompt": "ニュースまとめて",
   "cron": "0 9 * * *",
-  "command": "gemini -p 'ニュースまとめて'",
   "timezone": "Asia/Tokyo",
   "active": true
 }
 ```
 
-これだけで完了。スクリプトを作ったり、出力をパイプしたりしないこと。
-
 ### 権限の確認
 
-ユーザーのプロンプトに権限（`--allowedTools` 等）の指定がない場合、作成前にユーザーに確認してください。
+ユーザーのプロンプトに権限指定がない場合は、デフォルトで `safe` を使ってください。作成前の確認は不要です。
+
+- `safe` = もっとも安全寄りの既定値
+- Gemini CLI: `gemini -p 'プロンプト'`
+- Codex: `codex exec --sandbox read-only 'プロンプト'`
+- Claude Code: `claude --permission-mode default -p 'プロンプト'`
+
+ユーザーが明示的に `edit` / `plan` / `full` を指定した場合だけ、その権限プロファイルに合わせてコマンドを組み立ててください。
 
 ```
-このジョブに必要な権限を選んでください：
-
-① 権限なし（テキスト生成のみ）→ フラグ不要
-② ファイル書き込み → --allowedTools "Write"
-③ シェルコマンド実行 → --allowedTools "Bash"
-④ Web検索 → --allowedTools "WebSearch"
-⑤ 複数ツール → --allowedTools "Read,Write"
-⑥ 全権限スキップ（危険）
-   Claude Code: --dangerously-skip-permissions
-   Gemini CLI:  --yolo
-   Codex:       --dangerously-bypass-approvals-and-sandbox
-
-わからない場合は①を推奨
-```
-
-### Claude Code のシステムプロンプト
-
-Claude Code ジョブには確認要求を抑制するため以下を含めてください：
-
-```
-claude --system-prompt "Execute the task immediately. Do not ask for confirmation or clarification." -p 'プロンプト'
+権限指定がない場合の既定値:
+- safe
 ```
 
 ---

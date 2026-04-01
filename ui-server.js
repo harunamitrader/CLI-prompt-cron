@@ -146,6 +146,130 @@ function killProcessTree(pid) {
   return sent;
 }
 
+/**
+ * Extract a compact command summary for UI cards.
+ * @param {string | null | undefined} cmd
+ * @returns {{ tool: string|null, prompt: string, flags: string }}
+ */
+function summarizeCommand(cmd) {
+  if (!cmd) return { tool: null, prompt: '', flags: '' };
+
+  const trimmed = String(cmd).trim();
+  const toolMatch = trimmed.match(/^([^\s"']+)/);
+  const tool = toolMatch ? toolMatch[1] : null;
+
+  let prompt = '';
+  const pArgMatch = trimmed.match(/\s-p\s+(['"])([\s\S]*?)\1\s*$/);
+  if (pArgMatch) {
+    prompt = pArgMatch[2];
+  } else {
+    const tailQuoteMatch = trimmed.match(/(['"])([\s\S]*?)\1\s*$/);
+    prompt = tailQuoteMatch ? tailQuoteMatch[2] : trimmed;
+  }
+
+  const flagParts = trimmed.match(/--[\w-]+(?:=(?:"[^"]*"|'[^']*'|[^\s]+))?/g) || [];
+  const flags = flagParts.join(' ');
+
+  return { tool, prompt, flags };
+}
+
+function escapeSingleQuotedPrompt(prompt) {
+  return String(prompt || '').replace(/'/g, "''");
+}
+
+function buildCommand(targetCli, permissionProfile, prompt) {
+  const target = normalizeTargetCli(targetCli) || 'gemini';
+  const profile = ['safe', 'edit', 'plan', 'full'].includes(String(permissionProfile || '').trim().toLowerCase())
+    ? String(permissionProfile).trim().toLowerCase()
+    : 'safe';
+  const quotedPrompt = `'${escapeSingleQuotedPrompt(prompt)}'`;
+
+  if (target === 'gemini') {
+    const flagsByProfile = {
+      safe: '',
+      edit: '--approval-mode=auto_edit',
+      plan: '--approval-mode=plan',
+      full: '--approval-mode=yolo',
+    };
+    const flags = flagsByProfile[profile];
+    return `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`;
+  }
+
+  if (target === 'claude') {
+    const modeByProfile = {
+      safe: 'default',
+      edit: 'acceptEdits',
+      plan: 'plan',
+      full: 'bypassPermissions',
+    };
+    return `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`;
+  }
+
+  const codexFlagsByProfile = {
+    safe: '--sandbox read-only',
+    edit: '--sandbox workspace-write',
+    plan: '--sandbox read-only',
+    full: '--full-auto',
+  };
+  return `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`;
+}
+
+/**
+ * Normalize supported target CLI labels.
+ * @param {string | null | undefined} value
+ * @returns {'gemini' | 'claude' | 'codex' | null}
+ */
+function normalizeTargetCli(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return null;
+  if (v === 'gemini' || v === 'geminicli') return 'gemini';
+  if (v === 'claude' || v === 'claudecode' || v === 'claudecode') return 'claude';
+  if (v === 'codex' || v === 'codexcli') return 'codex';
+  return null;
+}
+
+/**
+ * Infer target CLI from a full command string.
+ * @param {string | null | undefined} cmd
+ * @returns {'gemini' | 'claude' | 'codex' | null}
+ */
+function inferTargetCli(cmd) {
+  const summary = summarizeCommand(cmd);
+  return normalizeTargetCli(summary.tool);
+}
+
+/**
+ * Infer the normalized permission profile.
+ * @param {'gemini' | 'claude' | 'codex' | null} targetCli
+ * @param {string | null | undefined} cmd
+ * @param {string | null | undefined} explicitValue
+ * @returns {'safe' | 'edit' | 'plan' | 'full'}
+ */
+function inferPermissionProfile(targetCli, cmd, explicitValue) {
+  const explicit = String(explicitValue || '').trim().toLowerCase();
+  if (['safe', 'edit', 'plan', 'full'].includes(explicit)) return /** @type {'safe' | 'edit' | 'plan' | 'full'} */ (explicit);
+
+  const raw = String(cmd || '');
+  if (targetCli === 'gemini') {
+    if (/--approval-mode=yolo\b|--yolo\b/i.test(raw)) return 'full';
+    if (/--approval-mode=plan\b/i.test(raw)) return 'plan';
+    if (/--approval-mode=auto_edit\b/i.test(raw)) return 'edit';
+    return 'safe';
+  }
+  if (targetCli === 'claude') {
+    if (/--permission-mode\s+bypassPermissions\b|--dangerously-skip-permissions\b/i.test(raw)) return 'full';
+    if (/--permission-mode\s+plan\b/i.test(raw)) return 'plan';
+    if (/--permission-mode\s+acceptEdits\b/i.test(raw)) return 'edit';
+    return 'safe';
+  }
+  if (targetCli === 'codex') {
+    if (/--full-auto\b|--dangerously-bypass-approvals-and-sandbox\b/i.test(raw)) return 'full';
+    if (/--sandbox\s+workspace-write\b/i.test(raw)) return 'edit';
+    return 'safe';
+  }
+  return 'safe';
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 /** GET / — serve public/index.html */
@@ -175,6 +299,13 @@ function handleJobs(res) {
     try {
       const raw = readFileSync(filePath, 'utf8');
       const job = JSON.parse(raw);
+      const targetCli = normalizeTargetCli(job.targetCli || job.command) || 'gemini';
+      const permissionProfile = inferPermissionProfile(targetCli, job.command, job.permissionProfile);
+      const prompt = typeof job.prompt === 'string' && job.prompt.trim()
+        ? job.prompt.trim()
+        : summarizeCommand(job.command).prompt;
+      const runtimeCommand = buildCommand(targetCli, permissionProfile, prompt);
+      const commandSummary = summarizeCommand(runtimeCommand);
       // Check if any processes are currently running
       let running = 0;
       const runningProcesses = [];
@@ -193,8 +324,14 @@ function handleJobs(res) {
       } catch { /* not running */ }
       return {
         name,
+        logId:    typeof job.logId === 'string' && job.logId.trim() ? job.logId.trim() : name,
+        targetCli,
+        permissionProfile,
         cron:     job.cron     ?? null,
-        command:  job.command  ?? null,
+        command:  runtimeCommand,
+        tool:     commandSummary.tool,
+        prompt,
+        flags:    commandSummary.flags,
         timezone: job.timezone ?? null,
         active:   job.active   !== false,
         running,
@@ -295,10 +432,16 @@ function handleUpdateJob(req, res, jobName) {
       if (body) {
         // Body present → update specified fields
         const updates = JSON.parse(body);
-        const allowed = ['cron', 'command', 'timezone', 'active'];
+        const allowed = ['logId', 'targetCli', 'permissionProfile', 'prompt', 'cron', 'timezone', 'active'];
         for (const key of allowed) {
           if (key in updates) job[key] = updates[key];
         }
+        delete job.command;
+
+        const targetCli = normalizeTargetCli(job.targetCli || '') || inferTargetCli(job.command) || 'gemini';
+        const permissionProfile = inferPermissionProfile(targetCli, '', job.permissionProfile);
+        if (job.targetCli !== undefined) job.targetCli = targetCli;
+        if (job.permissionProfile !== undefined || !job.permissionProfile) job.permissionProfile = permissionProfile;
 
         // Handle rename
         if (updates.name && updates.name !== jobName) {

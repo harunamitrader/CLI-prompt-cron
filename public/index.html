@@ -104,7 +104,7 @@
       border-radius: 12px;
       padding: 12px 15px;
       min-width: 200px;
-      max-width: 280px;
+      max-width: 320px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.07);
       flex-shrink: 0;
       border: 1px solid #EAE6DE;
@@ -141,6 +141,62 @@
       border-bottom: 1px dashed transparent;
     }
     .job-card-name:hover { border-bottom-color: #2C3E50; }
+    .job-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 7px;
+    }
+    .job-card-logid {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      font-size: 10px;
+      font-weight: 700;
+      color: #4A7FA5;
+      background: #EAF2F8;
+      border-radius: 999px;
+      padding: 3px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
+    }
+    .job-card-logid:hover { border-bottom-color: #4A7FA5; }
+    .job-card-tool {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      font-size: 10px;
+      font-weight: 700;
+      color: #8E5B2A;
+      background: #FDEBD0;
+      border-radius: 999px;
+      padding: 3px 8px;
+      margin-bottom: 7px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: default;
+    }
+    .job-card-profile {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      font-size: 10px;
+      font-weight: 700;
+      color: #1E8449;
+      background: #D5F0E0;
+      border-radius: 999px;
+      padding: 3px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
+    }
+    .job-card-profile:hover { border-bottom-color: #1E8449; }
     .job-card-schedule {
       font-size: 13px;
       color: #4A7FA5;
@@ -154,25 +210,17 @@
       font-size: 11px;
       color: #5D6D7E;
       margin-bottom: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
       line-height: 1.4;
       cursor: pointer;
       border-bottom: 1px dashed transparent;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 4;
+      overflow: hidden;
+      white-space: normal;
+      word-break: break-word;
     }
     .job-card-command:hover { border-bottom-color: #5D6D7E; }
-    .job-card-flags {
-      font-size: 10px;
-      color: #7F8C8D;
-      margin-bottom: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      cursor: pointer;
-      border-bottom: 1px dashed transparent;
-    }
-    .job-card-flags:hover { border-bottom-color: #7F8C8D; }
     .job-edit-input {
       width: 100%;
       font-family: inherit;
@@ -182,10 +230,36 @@
       outline: none;
       background: #FAFAF7;
     }
+    .job-edit-textarea {
+      width: 100%;
+      font-family: inherit;
+      border: 1px solid #4A7FA5;
+      border-radius: 4px;
+      padding: 5px 6px;
+      outline: none;
+      background: #FAFAF7;
+      resize: vertical;
+      height: calc(1.4em * 4 + 12px);
+      min-height: calc(1.4em * 4 + 12px);
+      line-height: 1.4;
+    }
     .job-edit-input.edit-name { font-size: 14px; color: #2C3E50; font-weight: 600; }
+    .job-edit-input.edit-logid { font-size: 10px; color: #4A7FA5; font-weight: 700; }
     .job-edit-input.edit-cron { font-size: 13px; color: #4A7FA5; font-weight: 500; }
     .job-edit-input.edit-prompt { font-size: 11px; color: #5D6D7E; }
-    .job-edit-input.edit-flags { font-size: 10px; color: #7F8C8D; }
+    .job-edit-textarea.edit-prompt { font-size: 11px; color: #5D6D7E; }
+    .job-edit-select {
+      width: 100%;
+      font-family: inherit;
+      border: 1px solid #4A7FA5;
+      border-radius: 999px;
+      padding: 4px 10px;
+      outline: none;
+      background: #FAFAF7;
+      font-size: 10px;
+      font-weight: 700;
+      color: #2C3E50;
+    }
     .job-card-next {
       font-size: 11px;
       color: #95A5A6;
@@ -337,6 +411,14 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
+    .log-time {
+      color: #7F8C8D;
+      font-weight: 600;
+    }
+    .log-tag {
+      color: #4A7FA5;
+      font-weight: 700;
+    }
     .log-fire   { color: #CA6F1E; }
     .log-exit   { color: #A0AAB4; }
     .log-stdout { color: #2C3E50; }
@@ -356,7 +438,7 @@
     }
     .result-item {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       padding: 7px 10px;
       border-radius: 8px;
@@ -376,8 +458,24 @@
       background: #4A7FA5;
       flex-shrink: 0;
       opacity: 0.6;
+      margin-top: 6px;
     }
     .result-item.active .result-dot { opacity: 1; }
+    .result-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .result-job {
+      font-weight: 600;
+      color: #2C3E50;
+      word-break: break-word;
+    }
+    .result-meta {
+      font-size: 11px;
+      color: #7F8C8D;
+    }
     .no-items {
       padding: 16px;
       color: #BDC3C7;
@@ -532,6 +630,21 @@
     });
   }
 
+  function fmtWithYear(date) {
+    if (!date) return '—';
+    const d = new Date(date);
+    if (isNaN(d)) return '—';
+    return d.toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+  }
+
   /* ── Relative time ── */
   function relativeTime(date) {
     if (!date) return null;
@@ -660,6 +773,135 @@
     return { prompt: prompt || cmd, flags };
   }
 
+  function normalizeTargetCli(value) {
+    const v = String(value || '').trim().toLowerCase();
+    if (!v) return '';
+    if (v === 'gemini' || v === 'geminicli') return 'gemini';
+    if (v === 'claude' || v === 'claudecode') return 'claude';
+    if (v === 'codex' || v === 'codexcli') return 'codex';
+    return '';
+  }
+
+  function detectTargetCli(cmd) {
+    if (!cmd) return '';
+    const match = String(cmd).trim().match(/^([^\s"']+)/);
+    return normalizeTargetCli(match ? match[1] : '');
+  }
+
+  function inferPermissionProfile(targetCli, cmd, explicitValue) {
+    const explicit = String(explicitValue || '').trim().toLowerCase();
+    if (['safe', 'edit', 'plan', 'full'].includes(explicit)) return explicit;
+    const raw = String(cmd || '');
+    if (targetCli === 'gemini') {
+      if (/--approval-mode=yolo\b|--yolo\b/i.test(raw)) return 'full';
+      if (/--approval-mode=plan\b/i.test(raw)) return 'plan';
+      if (/--approval-mode=auto_edit\b/i.test(raw)) return 'edit';
+      return 'safe';
+    }
+    if (targetCli === 'claude') {
+      if (/--permission-mode\s+bypassPermissions\b|--dangerously-skip-permissions\b/i.test(raw)) return 'full';
+      if (/--permission-mode\s+plan\b/i.test(raw)) return 'plan';
+      if (/--permission-mode\s+acceptEdits\b/i.test(raw)) return 'edit';
+      return 'safe';
+    }
+    if (targetCli === 'codex') {
+      if (/--full-auto\b|--dangerously-bypass-approvals-and-sandbox\b/i.test(raw)) return 'full';
+      if (/--sandbox\s+workspace-write\b/i.test(raw)) return 'edit';
+      return 'safe';
+    }
+    return 'safe';
+  }
+
+  function permissionLabel(profile) {
+    const labels = {
+      safe: 'safe',
+      edit: 'edit',
+      plan: 'plan',
+      full: 'full'
+    };
+    return labels[profile] || 'safe';
+  }
+
+  function escapeSingleQuotedPrompt(prompt) {
+    return String(prompt || '').replace(/'/g, "''");
+  }
+
+  function buildCommand(targetCli, permissionProfile, prompt) {
+    const target = normalizeTargetCli(targetCli) || 'gemini';
+    const profile = ['safe', 'edit', 'plan', 'full'].includes(permissionProfile) ? permissionProfile : 'safe';
+    const quotedPrompt = `'${escapeSingleQuotedPrompt(prompt)}'`;
+
+    if (target === 'gemini') {
+      const flagsByProfile = {
+        safe: '',
+        edit: '--approval-mode=auto_edit',
+        plan: '--approval-mode=plan',
+        full: '--approval-mode=yolo'
+      };
+      const flags = flagsByProfile[profile];
+      return `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`;
+    }
+
+    if (target === 'claude') {
+      const modeByProfile = {
+        safe: 'default',
+        edit: 'acceptEdits',
+        plan: 'plan',
+        full: 'bypassPermissions'
+      };
+      return `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`;
+    }
+
+    const codexFlagsByProfile = {
+      safe: '--sandbox read-only',
+      edit: '--sandbox workspace-write',
+      plan: '--sandbox read-only',
+      full: '--full-auto'
+    };
+    return `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`;
+  }
+
+  function formatLogLine(text) {
+    const match = String(text).match(/^\[([^\]]+)\]\s+(\[[^\]]+\]\s+.*)$/);
+    if (!match) return { time: '', tag: '', message: text };
+
+    const formattedTs = fmtWithYear(match[1]);
+    const rest = match[2];
+    const tagMatch = rest.match(/^(\[[^\]]+\])\s*(.*)$/);
+
+    return {
+      time: formattedTs,
+      tag: tagMatch ? tagMatch[1] : '',
+      message: tagMatch ? tagMatch[2] : rest
+    };
+  }
+
+  function parseResultFilename(filename) {
+    const withoutExt = String(filename).replace(/\.txt$/, '');
+    const tsMatch = withoutExt.match(/-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}(?:\.\d+)?(?:-\d+)?Z?)$/);
+    if (!tsMatch) return null;
+    const timestamp = tsMatch[1].replace(/T(\d{2})-(\d{2})-(\d{2})/, 'T$1:$2:$3');
+    const jobName = withoutExt.slice(0, withoutExt.length - tsMatch[0].length);
+    return { jobName, timestamp };
+  }
+
+  function resultDisplayInfo(file) {
+    if (typeof file === 'string') {
+      const parsed = parseResultFilename(file);
+      return {
+        filename: file,
+        title: parsed?.jobName || file,
+        meta: parsed?.timestamp ? fmtWithYear(parsed.timestamp) : ''
+      };
+    }
+    const filename = file.filename || file.name || JSON.stringify(file);
+    const title = file.jobName || filename;
+    const pieces = [];
+    if (file.timestamp) pieces.push(fmtWithYear(file.timestamp));
+    if (typeof file.size === 'number') pieces.push(`${file.size.toLocaleString('ja-JP')} bytes`);
+    return { filename, title, meta: pieces.join(' / ') };
+  }
+
   /* ── Jobs ── */
   function renderJobs(jobs) {
     const scroll = document.getElementById('jobs-scroll');
@@ -685,13 +927,26 @@
       const btnClass = active ? 'stop' : 'resume';
       const btnLabel = active ? '停止' : '再開';
       const cmd = job.command || '';
-      const parsed = parseCommand(cmd);
+      const parsed = {
+        prompt: job.prompt || ''
+      };
+      if (!parsed.prompt) {
+        const fallback = parseCommand(cmd);
+        parsed.prompt = parsed.prompt || fallback.prompt;
+      }
+      const targetCli = normalizeTargetCli(job.targetCli || detectTargetCli(cmd) || job.tool) || 'gemini';
+      const permissionProfile = inferPermissionProfile(targetCli, cmd, job.permissionProfile);
+      const logId = job.logId || job.name || '';
       return `<div class="job-card" data-job-name="${esc(job.name)}">
         <div class="job-card-top">${badge}</div>
         <div class="job-card-name" data-field="name" data-raw="${esc(job.name || '')}" title="クリックで編集">${esc(job.name || job.id || '—')}</div>
+        <div class="job-card-meta">
+          <div class="job-card-logid" data-field="logId" data-raw="${esc(logId)}" title="クリックで編集">logID: ${esc(logId)}</div>
+          <div class="job-card-tool" data-field="targetCli" data-raw="${esc(targetCli)}" title="クリックで編集">${esc(targetCli)}</div>
+          <div class="job-card-profile" data-field="permissionProfile" data-raw="${esc(permissionProfile)}" title="クリックで編集">${esc(permissionLabel(permissionProfile))}</div>
+        </div>
         <div class="job-card-schedule" data-field="cron" data-raw="${esc(job.cron || '')}" title="クリックで編集">${esc(schedule)}</div>
         <div class="job-card-command" data-field="prompt" data-raw="${esc(parsed.prompt)}" title="クリックで編集">${esc(parsed.prompt || '(プロンプト未設定)')}</div>
-        <div class="job-card-flags" data-field="flags" data-raw="${esc(parsed.flags)}" title="クリックで編集">${esc(parsed.flags || '(権限未設定)')}</div>
         ${nextLabel ? `<div class="job-card-next">${nextLabel}</div>` : ''}
         <div class="job-card-actions">
           <button class="toggle-btn ${btnClass}" data-job="${esc(job.name)}">${btnLabel}</button>
@@ -783,35 +1038,61 @@
 
   /* ── Inline editing ── */
   function startInlineEdit(el) {
-    if (el.querySelector('input')) return; // already editing
+    if (el.querySelector('input, textarea, select')) return; // already editing
     const field = el.dataset.field;
     const raw = el.dataset.raw || '';
     const card = el.closest('.job-card');
     const jobName = card.dataset.jobName;
 
-    const cssClasses = { name: 'edit-name', cron: 'edit-cron', prompt: 'edit-prompt', flags: 'edit-flags' };
-    const placeholders = { name: 'ジョブ名', cron: '例: 0 9 * * *', prompt: 'プロンプトを入力', flags: '例: --full-auto' };
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'job-edit-input ' + (cssClasses[field] || '');
-    input.value = raw;
-    input.placeholder = placeholders[field] || '';
+    const cssClasses = { name: 'edit-name', logId: 'edit-logid', cron: 'edit-cron', prompt: 'edit-prompt' };
+    const placeholders = { name: 'ジョブ名', logId: '例: 001', cron: '例: 0 9 * * *', prompt: 'プロンプトを入力' };
+    const isPromptField = field === 'prompt';
+    const isSelectField = field === 'targetCli' || field === 'permissionProfile';
+    const input = isSelectField ? document.createElement('select') : (isPromptField ? document.createElement('textarea') : document.createElement('input'));
+    if (isSelectField) {
+      input.className = 'job-edit-select';
+      const options = field === 'targetCli'
+        ? [
+            ['gemini', 'geminiCLI'],
+            ['claude', 'claudeCode'],
+            ['codex', 'codexCLI']
+          ]
+        : [
+            ['safe', 'safe'],
+            ['edit', 'edit'],
+            ['plan', 'plan'],
+            ['full', 'full']
+          ];
+      input.innerHTML = options.map(([value, label]) => `<option value="${esc(value)}"${value === raw ? ' selected' : ''}>${esc(label)}</option>`).join('');
+    } else if (isPromptField) {
+      input.rows = 4;
+      input.className = 'job-edit-textarea ' + (cssClasses[field] || '');
+      input.value = raw;
+      input.placeholder = placeholders[field] || '';
+    } else {
+      input.type = 'text';
+      input.className = 'job-edit-input ' + (cssClasses[field] || '');
+      input.value = raw;
+      input.placeholder = placeholders[field] || '';
+    }
 
     el.textContent = '';
     el.appendChild(input);
     input.focus();
-    input.select();
+    if (typeof input.select === 'function') input.select();
     editing = true;
 
     function cancel() {
       editing = false;
       input.removeEventListener('blur', onBlur);
+      if (isSelectField) input.removeEventListener('change', save);
       fetchJobs();
     }
 
     async function save() {
       editing = false;
       input.removeEventListener('blur', onBlur);
+      if (isSelectField) input.removeEventListener('change', save);
       const newVal = input.value.trim();
       if (!newVal || newVal === raw) { cancel(); return; }
 
@@ -821,35 +1102,33 @@
           const err = await res.json().catch(() => ({}));
           alert(err.error || 'リネーム失敗');
         }
+      } else if (field === 'logId') {
+        await patchJob(jobName, { logId: newVal });
       } else if (field === 'cron') {
         await patchJob(jobName, { cron: newVal });
+      } else if (field === 'prompt') {
+        await patchJob(jobName, { prompt: newVal });
       } else {
         // Get current full command from API
         const jobs = await fetch('/api/jobs').then(r => r.json());
         const jobData = jobs.find(j => j.name === jobName);
-        const origCmd = jobData?.command || '';
-
-        // Extract base command (e.g. "codex exec") — everything before first flag or quote
-        const baseMatch = origCmd.match(/^(.*?)(?=\s+--|\s+['"])/);
-        const base = baseMatch ? baseMatch[1].trim() : origCmd.split(/\s*['"][^'"]*['"]\s*$/)[0].trim();
-
-        const promptEl = card.querySelector('[data-field="prompt"]');
-        const flagsEl = card.querySelector('[data-field="flags"]');
-        const newPrompt = field === 'prompt' ? newVal : (promptEl?.dataset.raw || '');
-        const newFlags = field === 'flags' ? newVal : (flagsEl?.dataset.raw || '');
-
-        const parts = [base];
-        if (newFlags) parts.push(newFlags);
-        if (newPrompt) parts.push(`'${newPrompt}'`);
-        await patchJob(jobName, { command: parts.join(' ') });
+        const currentTargetCli = normalizeTargetCli(jobData?.targetCli || card.querySelector('[data-field="targetCli"]')?.dataset.raw || detectTargetCli(jobData?.command || '')) || 'gemini';
+        const currentPermissionProfile = inferPermissionProfile(currentTargetCli, jobData?.command || '', jobData?.permissionProfile || card.querySelector('[data-field="permissionProfile"]')?.dataset.raw);
+        const newTargetCli = field === 'targetCli' ? newVal : currentTargetCli;
+        const newPermissionProfile = field === 'permissionProfile' ? newVal : currentPermissionProfile;
+        await patchJob(jobName, {
+          targetCli: newTargetCli,
+          permissionProfile: newPermissionProfile
+        });
       }
       fetchJobs();
     }
 
     function onBlur() { save(); }
     input.addEventListener('blur', onBlur);
+    if (isSelectField) input.addEventListener('change', save);
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      if (e.key === 'Enter' && (!isPromptField || (e.ctrlKey || e.metaKey))) { e.preventDefault(); save(); }
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     });
   }
@@ -920,7 +1199,12 @@
     }
     const line = document.createElement('div');
     line.className = 'log-line ' + classifyLine(text);
-    line.textContent = text;
+    const parts = formatLogLine(text);
+    if (!parts.time && !parts.tag) {
+      line.textContent = parts.message;
+    } else {
+      line.innerHTML = `${parts.time ? `<span class="log-time">${esc(parts.time)}</span> ` : ''}${parts.tag ? `<span class="log-tag">${esc(parts.tag)}</span> ` : ''}${esc(parts.message)}`;
+    }
     logPane.appendChild(line);
     logLines++;
     logPane.scrollTop = logPane.scrollHeight;
@@ -973,10 +1257,14 @@
       return;
     }
     resultsList.innerHTML = files.map(f => {
-      const name = typeof f === 'string' ? f : (f.filename || f.name || JSON.stringify(f));
-      const isActive = name === activeResultFile;
-      return `<div class="result-item${isActive ? ' active' : ''}" data-file="${esc(name)}">
-        <span class="result-dot"></span>${esc(name)}
+      const info = resultDisplayInfo(f);
+      const isActive = info.filename === activeResultFile;
+      return `<div class="result-item${isActive ? ' active' : ''}" data-file="${esc(info.filename)}">
+        <span class="result-dot"></span>
+        <div class="result-main">
+          <div class="result-job">${esc(info.title)}</div>
+          ${info.meta ? `<div class="result-meta">${esc(info.meta)}</div>` : ''}
+        </div>
       </div>`;
     }).join('');
     resultsList.querySelectorAll('.result-item').forEach(el => {
@@ -1010,7 +1298,8 @@
     try {
       const res  = await fetch('/api/results/' + encodeURIComponent(filename));
       const text = await res.text();
-      modalTitle.textContent = filename;
+      const resultInfo = resultDisplayInfo({ filename });
+      modalTitle.textContent = resultInfo.title;
       modalBody.textContent  = text;
       modal.classList.add('open');
     } catch (e) {

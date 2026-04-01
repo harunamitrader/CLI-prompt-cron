@@ -172,33 +172,47 @@ JOB_TIMEOUT_MINUTES=30 npm start
 
 ```json
 {
+  "targetCli": "gemini",
+  "permissionProfile": "safe",
+  "prompt": "今日のニュースをまとめて",
   "cron": "0 9 * * *",
-  "command": "gemini -p '今日のニュースをまとめて'",
   "timezone": "Asia/Tokyo",
   "active": true
 }
 ```
 
-### CLI 別コマンド例
+### 実行時のコマンド生成
 
 ```bash
-# Gemini CLI
-"command": "gemini -p 'タスクの内容'"
+# safe
+gemini -p 'タスクの内容'
+claude --permission-mode default -p 'タスクの内容'
+codex exec --sandbox read-only 'タスクの内容'
 
-# Codex（非インタラクティブ実行には exec サブコマンドが必要）
-"command": "codex exec 'タスクの内容'"
+# edit
+gemini --approval-mode=auto_edit -p 'タスクの内容'
+claude --permission-mode acceptEdits -p 'タスクの内容'
+codex exec --sandbox workspace-write 'タスクの内容'
 
-# Claude Code（--system-prompt で確認要求を抑制）
-"command": "claude --system-prompt \"Execute the task immediately. Do not ask for confirmation or clarification.\" -p \"タスクの内容\""
+# plan
+gemini --approval-mode=plan -p 'タスクの内容'
+claude --permission-mode plan -p 'タスクの内容'
+codex exec --sandbox read-only 'タスクの内容'
 
-# プロジェクトディレクトリ内で実行
-"command": "cd /path/to/project && gemini -p 'このプロジェクトをレビューして'"
+# full
+gemini --approval-mode=yolo -p 'タスクの内容'
+claude --permission-mode bypassPermissions -p 'タスクの内容'
+codex exec --full-auto 'タスクの内容'
 ```
+
+JSON には上のコマンド文字列を保存しません。`targetCli` と `permissionProfile` と `prompt` から、`cli-prompt-cron` が実行時に組み立てます。
 
 | フィールド  | 型      | 必須 | 説明                                                    |
 |------------|---------|------|---------------------------------------------------------|
+| `targetCli` | string |      | `gemini` / `claude` / `codex`。省略時は `gemini` |
+| `permissionProfile` | string |      | `safe` / `edit` / `plan` / `full`。省略時は `safe` |
+| `prompt`   | string  | ✓    | CLI に送る本文。実際のコマンドは実行時に組み立て |
 | `cron`     | string  | ✓    | cron 式（5フィールド形式）                               |
-| `command`  | string  | ✓    | 実行するシェルコマンド                                   |
 | `timezone` | string  |      | タイムゾーン（例: `"Asia/Tokyo"`）省略時はローカル時刻  |
 | `active`   | boolean |      | `false` にするとジョブを一時停止（デフォルト: `true`）   |
 
@@ -209,7 +223,7 @@ JOB_TIMEOUT_MINUTES=30 npm start
 ブラウザで `http://localhost:3300` を開くと以下が確認できます：
 
 - **実行中モニター** — 実行中のプロセスを経過時間付きでリアルタイム表示。強制停止もワンクリック
-- **ジョブ一覧** — 登録済みジョブの一覧・コマンド内容・次回実行時刻を表示。停止・再開ボタンで有効/無効を切り替え。cron式・プロンプト・権限はクリックでインライン編集可能
+- **ジョブ一覧** — 登録済みジョブの一覧・送信先 CLI・権限プロファイル・次回実行時刻を表示。停止・再開ボタンで有効/無効を切り替え。`logId`・送信先・権限・cron式・プロンプトはクリックでインライン編集可能
 - **ライブログ** — 実行中のコマンド出力をリアルタイム表示
 - **実行結果** — 過去の実行履歴と出力内容
 - **デスクトップ通知** — ジョブ完了時に実行結果の内容をブラウザ通知でポップアップ表示

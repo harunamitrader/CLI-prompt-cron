@@ -72,16 +72,104 @@ function shellArgs(command) {
     : ['sh',  ['-c', command]];
 }
 
+function normalizeTargetCli(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (v === 'gemini' || v === 'geminicli') return 'gemini';
+  if (v === 'claude' || v === 'claudecode') return 'claude';
+  if (v === 'codex' || v === 'codexcli') return 'codex';
+  return null;
+}
+
+function normalizePermissionProfile(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return ['safe', 'edit', 'plan', 'full'].includes(v) ? v : null;
+}
+
+function parseLegacyCommand(cmd) {
+  const raw = String(cmd || '').trim();
+  if (!raw) return { targetCli: null, permissionProfile: null, prompt: '' };
+
+  const toolMatch = raw.match(/^([^\s"']+)/);
+  const targetCli = normalizeTargetCli(toolMatch ? toolMatch[1] : '');
+  let prompt = '';
+  const pArgMatch = raw.match(/\s-p\s+(['"])([\s\S]*?)\1\s*$/);
+  if (pArgMatch) {
+    prompt = pArgMatch[2];
+  } else {
+    const tailQuoteMatch = raw.match(/(['"])([\s\S]*?)\1\s*$/);
+    prompt = tailQuoteMatch ? tailQuoteMatch[2] : raw;
+  }
+
+  let permissionProfile = null;
+  if (targetCli === 'gemini') {
+    if (/--approval-mode=yolo\b|--yolo\b/i.test(raw)) permissionProfile = 'full';
+    else if (/--approval-mode=plan\b/i.test(raw)) permissionProfile = 'plan';
+    else if (/--approval-mode=auto_edit\b/i.test(raw)) permissionProfile = 'edit';
+    else permissionProfile = 'safe';
+  } else if (targetCli === 'claude') {
+    if (/--permission-mode\s+bypassPermissions\b|--dangerously-skip-permissions\b/i.test(raw)) permissionProfile = 'full';
+    else if (/--permission-mode\s+plan\b/i.test(raw)) permissionProfile = 'plan';
+    else if (/--permission-mode\s+acceptEdits\b/i.test(raw)) permissionProfile = 'edit';
+    else permissionProfile = 'safe';
+  } else if (targetCli === 'codex') {
+    if (/--full-auto\b|--dangerously-bypass-approvals-and-sandbox\b/i.test(raw)) permissionProfile = 'full';
+    else if (/--sandbox\s+workspace-write\b/i.test(raw)) permissionProfile = 'edit';
+    else permissionProfile = 'safe';
+  }
+
+  return { targetCli, permissionProfile, prompt };
+}
+
+function escapeSingleQuotedPrompt(prompt) {
+  return String(prompt || '').replace(/'/g, "''");
+}
+
+function buildCommand(targetCli, permissionProfile, prompt) {
+  const target = normalizeTargetCli(targetCli) || 'gemini';
+  const profile = normalizePermissionProfile(permissionProfile) || 'safe';
+  const quotedPrompt = `'${escapeSingleQuotedPrompt(prompt)}'`;
+
+  if (target === 'gemini') {
+    const flagsByProfile = {
+      safe: '',
+      edit: '--approval-mode=auto_edit',
+      plan: '--approval-mode=plan',
+      full: '--approval-mode=yolo',
+    };
+    const flags = flagsByProfile[profile];
+    return `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`;
+  }
+
+  if (target === 'claude') {
+    const modeByProfile = {
+      safe: 'default',
+      edit: 'acceptEdits',
+      plan: 'plan',
+      full: 'bypassPermissions',
+    };
+    return `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`;
+  }
+
+  const codexFlagsByProfile = {
+    safe: '--sandbox read-only',
+    edit: '--sandbox workspace-write',
+    plan: '--sandbox read-only',
+    full: '--full-auto',
+  };
+  return `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`;
+}
+
 // ── Job runner ────────────────────────────────────────────────────────────────
 
 /**
  * Spawn a shell command, stream stdout/stderr to the log, and write a result
  * file to RESULTS_DIR on exit.
  * @param {string} jobName
+ * @param {string} logTag
  * @param {string} command
  */
-function runCommand(jobName, command) {
-  log(jobName, `FIRE → ${command}`);
+function runCommand(jobName, logTag, command) {
+  log(logTag, `FIRE → ${command}`);
 
   const [bin, args] = shellArgs(command);
   const child = spawn(bin, args, {
@@ -93,7 +181,7 @@ function runCommand(jobName, command) {
 
   // Auto-kill after timeout
   const timeout = setTimeout(() => {
-    log(jobName, `TIMEOUT — process exceeded ${TIMEOUT_MS / 60000} minutes, killing…`);
+    log(logTag, `TIMEOUT — process exceeded ${TIMEOUT_MS / 60000} minutes, killing…`);
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
     setTimeout(() => {
       try { child.kill('SIGKILL'); } catch { /* ignore */ }
@@ -103,7 +191,7 @@ function runCommand(jobName, command) {
 
   // Write PID to pid file (array of running processes)
   const pidFile = join(PIDS_DIR, `${jobName}.json`);
-  const pidEntry = { pid: child.pid, command, startedAt: new Date().toISOString() };
+  const pidEntry = { pid: child.pid, command, startedAt: new Date().toISOString(), logTag };
   try {
     let pids = [];
     try { pids = JSON.parse(readFileSync(pidFile, 'utf8')); } catch { /* new file */ }
@@ -118,7 +206,7 @@ function runCommand(jobName, command) {
   child.stdout.on('data', (chunk) => {
     for (const line of chunk.toString().split('\n')) {
       if (line.trim()) {
-        log(`${jobName}/stdout`, line);
+        log(`${logTag}/stdout`, line);
         stdoutLines.push(line);
       }
     }
@@ -126,17 +214,17 @@ function runCommand(jobName, command) {
 
   child.stderr.on('data', (chunk) => {
     for (const line of chunk.toString().split('\n')) {
-      if (line.trim()) log(`${jobName}/stderr`, line);
+      if (line.trim()) log(`${logTag}/stderr`, line);
     }
   });
 
   child.on('error', (err) => {
-    log(`${jobName}/error`, `spawn error: ${err.message}`);
+    log(`${logTag}/error`, `spawn error: ${err.message}`);
   });
 
   child.on('close', (code) => {
     runningChildren.delete(child);
-    log(jobName, `EXIT code=${code ?? '?'}`);
+    log(logTag, `EXIT code=${code ?? '?'}`);
 
     // Remove this PID from pid file
     try {
@@ -160,9 +248,9 @@ function runCommand(jobName, command) {
       const filename = `${jobName}-${ts}.txt`;
       const filePath = join(RESULTS_DIR, filename);
       writeFileSync(filePath, stdoutLines.join('\n'), 'utf8');
-      log(jobName, `Result saved → ${filename}`);
+      log(logTag, `Result saved → ${filename}`);
     } catch (err) {
-      log(jobName, `Failed to save result: ${err.message}`);
+      log(logTag, `Failed to save result: ${err.message}`);
     }
   });
 }
@@ -173,7 +261,7 @@ function runCommand(jobName, command) {
  * Parse a job file, validate it, and return a job object.
  * Returns null on any error.
  * @param {string} filePath
- * @returns {{ name: string, cron: string, command: string, timezone?: string, active: boolean } | null}
+ * @returns {{ name: string, logId: string, targetCli: string, permissionProfile: string, prompt: string, command: string, timezone?: string, active: boolean } | null}
  */
 function parseJob(filePath) {
   let raw;
@@ -197,21 +285,42 @@ function parseJob(filePath) {
     return null;
   }
 
-  if (typeof job.command !== 'string' || !job.command.trim()) {
-    log('daemon', `Missing or invalid "command" field in ${filePath}`);
+  if (!cron.validate(job.cron)) {
+    log('daemon', `Invalid cron expression "${job.cron}" in ${filePath}`);
     return null;
   }
 
-  if (!cron.validate(job.cron)) {
-    log('daemon', `Invalid cron expression "${job.cron}" in ${filePath}`);
+  const legacy = parseLegacyCommand(job.command);
+  const targetCli = normalizeTargetCli(job.targetCli) || legacy.targetCli;
+  const permissionProfile = normalizePermissionProfile(job.permissionProfile) || legacy.permissionProfile || 'safe';
+  const prompt = typeof job.prompt === 'string' && job.prompt.trim()
+    ? job.prompt.trim()
+    : legacy.prompt;
+
+  if (!targetCli) {
+    log('daemon', `Missing or invalid "targetCli" field in ${filePath}`);
+    return null;
+  }
+
+  if (!normalizePermissionProfile(permissionProfile)) {
+    log('daemon', `Missing or invalid "permissionProfile" field in ${filePath}`);
+    return null;
+  }
+
+  if (!prompt) {
+    log('daemon', `Missing or invalid "prompt" field in ${filePath}`);
     return null;
   }
 
   const name = basename(filePath, '.json');
   return {
     name,
+    logId:    typeof job.logId === 'string' && job.logId.trim() ? job.logId.trim() : name,
+    targetCli,
+    permissionProfile,
+    prompt,
     cron:     job.cron.trim(),
-    command:  job.command.trim(),
+    command:  buildCommand(targetCli, permissionProfile, prompt),
     timezone: typeof job.timezone === 'string' ? job.timezone.trim() : undefined,
     active:   job.active !== false, // default true
   };
@@ -241,7 +350,7 @@ function registerJob(filePath) {
 
   let task;
   try {
-    task = cron.schedule(job.cron, () => runCommand(job.name, job.command), options);
+    task = cron.schedule(job.cron, () => runCommand(job.name, job.logId, job.command), options);
   } catch (err) {
     log('daemon', `Failed to schedule job "${job.name}": ${err.message}`);
     return;

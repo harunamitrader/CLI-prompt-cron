@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-01
+
+### Added
+- **送信先 CLI の明示設定**: ジョブごとに `targetCli` として `gemini` / `claude` / `codex` を保存し、ダッシュボードから切り替え可能に
+- **権限プロファイルの統一**: `permissionProfile` を `safe` / `edit` / `plan` / `full` の4種類に統一し、ダッシュボードから選択可能に
+- **logId 表示**: ジョブカードに `logId` を表示し、ログタグも `logId` 優先で出力できるように
+
+### Changed
+- **ジョブ JSON スキーマ**: `command` 保存中心から `targetCli` / `permissionProfile` / `prompt` 保存中心に変更。実際の CLI コマンドは実行時にデーモン側で組み立て
+- **README / SKILL.md 更新**: 新しいジョブスキーマ、`safe` 既定、送信先 CLI と権限プロファイルの仕様に合わせて説明を更新
+- **ダッシュボード表示改善**: 長いプロンプトの複数行表示、編集時の4行 textarea、ログ時刻とタグの色分け、実行結果の見やすい日時表示を追加
+
 ## [1.4.0] - 2026-03-29
 
 ### Added
