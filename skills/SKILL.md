@@ -9,7 +9,7 @@
 **やっていいこと:**
 - `data/jobs/` 内の JSON ファイルの作成・編集・削除
 - `data/jobs/` `data/logs/` `data/results/` の内容の読み取り
-- デーモンの起動（`node start.js`）
+- デーモン / ダッシュボードの起動（`node start.js` または `npm start`）
 
 **やってはいけないこと:**
 - スクリプトファイル（.sh, .bat, .ps1, .py 等）の作成
@@ -38,6 +38,7 @@
 ## ジョブ追加
 
 `<プロジェクトルート>/data/jobs/<名前>.json` を作成します。
+新規作成時は、既存ジョブと重複しない `logId` を必ず選んでください。
 
 ```json
 {
@@ -54,7 +55,7 @@
 | フィールド  | 型      | 必須 | 説明 |
 |------------|---------|------|------|
 | `logId` | string | ✓ | `0000`〜`9999` の4桁数字。既存ジョブと重複不可 |
-| `targetCli` | string | ✓ | `gemini` / `claude` / `codex` |
+| `targetCli` | string | ✓ | `gemini` / `claude` / `codex`。新規ジョブでは省略しない |
 | `permissionProfile` | string |      | `safe` / `edit` / `plan` / `full`。未指定時は `safe` |
 | `prompt`   | string  | ✓    | ユーザーに送る本文 |
 | `cron`     | string  | ✓    | cron 式（5フィールド形式） |
@@ -138,6 +139,12 @@ JSON ファイルを削除します。
 
 ```bash
 node <プロジェクトルート>/start.js
+```
+
+または:
+
+```bash
+npm start
 ```
 
 ---

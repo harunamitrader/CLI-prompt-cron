@@ -215,7 +215,7 @@ JSON には上のコマンド文字列を保存しません。`targetCli` と `p
 | フィールド  | 型      | 必須 | 説明                                                    |
 |------------|---------|------|---------------------------------------------------------|
 | `logId` | string | ✓ | `0000`〜`9999` の4桁数字。既存ジョブと重複不可 |
-| `targetCli` | string |      | `gemini` / `claude` / `codex`。省略時は `gemini` |
+| `targetCli` | string | ✓    | `gemini` / `claude` / `codex` |
 | `permissionProfile` | string |      | `safe` / `edit` / `plan` / `full`。省略時は `safe` |
 | `prompt`   | string  | ✓    | CLI に送る本文。実際のコマンドは実行時に組み立て |
 | `cron`     | string  | ✓    | cron 式（5フィールド形式）                               |
