@@ -8,7 +8,7 @@
 
 **やっていいこと:**
 - `data/jobs/` 内の JSON ファイルの作成・編集・削除
-- `data/jobs/` `data/logs/` `data/results/` の内容の読み取り
+- `data/jobs/` `data/logs/` `data/results/` `data/sessions/` の内容の読み取り
 - デーモン / ダッシュボードの起動（`node start.js` または `npm start`）
 
 **やってはいけないこと:**
@@ -31,6 +31,7 @@
 <プロジェクトルート>/data/jobs/    ← ジョブファイル（あなたが編集する唯一の場所）
 <プロジェクトルート>/data/logs/    ← 実行ログ（読み取り専用）
 <プロジェクトルート>/data/results/ ← 実行結果（読み取り専用）
+<プロジェクトルート>/data/sessions/← 管理対象セッション（読み取り専用）
 ```
 
 ---
@@ -112,6 +113,22 @@ CLI コマンドは JSON に直接保存しません。`targetCli` と `permissi
 - 3桁以下、5桁以上、英字や記号を含む値は無効です
 - 既存ジョブと同じ `logId` は使えません
 
+### `sessionStrategy` のルール
+
+- 既定値は `fresh` です
+- `fresh` は毎回新しい session を作ります
+- 既存 session を使うときだけ `session:<sessionId>` を設定してください
+- `sessionId` は `data/sessions/` にある、`cli-prompt-cron` 管理下の session だけを使ってください
+- `data/sessions/` に無い sessionId を推測で書かないでください
+
+session を選ぶ必要がある場合は、`data/sessions/` を読んで候補を確認してください。候補は通常 `logId / job名 / 作成時刻 / sessionId末尾` で見分けます。
+
+### ダッシュボードとの役割分担
+
+- ダッシュボード UI でもジョブの作成・編集・削除はできます
+- ただしこのスキルを使うときは、保存済みの `data/jobs/` を正として扱ってください
+- UI の見た目だけを根拠にせず、実際の JSON を確認してから変更してください
+
 ---
 
 ## ジョブ停止
@@ -137,6 +154,10 @@ JSON ファイルを削除します。
 ## 実行結果確認
 
 `<プロジェクトルート>/data/results/` の内容を読みます。
+
+## セッション確認
+
+`<プロジェクトルート>/data/sessions/` の内容を読みます。
 
 ## ダッシュボード起動
 
