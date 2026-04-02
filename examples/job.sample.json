@@ -2,6 +2,7 @@
   "logId": "0001",
   "targetCli": "codex",
   "permissionProfile": "safe",
+  "sessionStrategy": "fresh",
   "prompt": "AI ツールに関する短いメモを1つ作って",
   "cron": "0 9 * * *",
   "timezone": "Asia/Tokyo",

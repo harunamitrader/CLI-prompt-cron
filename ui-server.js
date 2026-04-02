@@ -18,6 +18,7 @@ import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, appendF
 import { join, basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import cron from 'node-cron';
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -27,8 +28,10 @@ const JOBS_DIR    = join(BASE_DIR, 'jobs');
 const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');
 const PIDS_DIR    = join(BASE_DIR, 'pids');
+const SESSIONS_DIR = join(BASE_DIR, 'sessions');
 const PUBLIC_DIR  = join(__dirname, 'public');
 const SETTINGS_PATH = join(BASE_DIR, 'settings.json');
+const JOB_SESSION_USAGE_PATH = join(SESSIONS_DIR, 'job-usage.json');
 const FALLBACK_WORKDIR = process.env.CLI_PROMPT_CRON_WORKDIR || resolve(__dirname, '..', '..', '..', '..');
 const APP_VERSION = (() => {
   try {
@@ -40,6 +43,7 @@ const APP_VERSION = (() => {
 })();
 
 const PORT = Number(process.env.PORT) || 3300;
+const IS_WINDOWS = process.platform === 'win32';
 
 // ── SSE client registry ───────────────────────────────────────────────────────
 
@@ -128,6 +132,15 @@ function isValidLogId(value) {
   return /^\d{4}$/.test(String(value || '').trim());
 }
 
+function isValidJobName(value) {
+  const name = String(value || '').trim();
+  return Boolean(name)
+    && !name.includes('..')
+    && !name.includes('/')
+    && !name.includes('\\')
+    && !/[<>:"|?*]/.test(name);
+}
+
 function collectOtherLogIds(currentJobName) {
   const ids = new Set();
   let files = [];
@@ -161,6 +174,12 @@ function appendLog(tag, message) {
   const ts   = new Date().toISOString();
   const line = `[${ts}] [${tag}] ${message}\n`;
   try { appendFileSync(todayLogPath(), line, 'utf8'); } catch { /* ignore */ }
+}
+
+function shellArgs(command) {
+  return IS_WINDOWS
+    ? ['powershell', ['-Command', command]]
+    : ['sh', ['-c', command]];
 }
 
 /**
@@ -232,11 +251,116 @@ function escapeSingleQuotedPrompt(prompt) {
   return String(prompt || '').replace(/'/g, "''");
 }
 
-function buildCommand(targetCli, permissionProfile, prompt) {
+function normalizeSessionStrategy(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'fresh';
+  if (raw.toLowerCase() === 'fresh') return 'fresh';
+  const match = raw.match(/^session:(.+)$/i);
+  if (match && match[1].trim()) return `session:${match[1].trim()}`;
+  return 'fresh';
+}
+
+function parseSessionStrategy(value) {
+  const normalized = normalizeSessionStrategy(value);
+  if (normalized === 'fresh') return { mode: 'fresh', sessionId: null, value: 'fresh' };
+  return { mode: 'selected', sessionId: normalized.slice('session:'.length), value: normalized };
+}
+
+function sessionRecordPath(sessionId) {
+  return join(SESSIONS_DIR, `${sessionId}.json`);
+}
+
+function readSessionRecord(sessionId) {
+  try {
+    const raw = JSON.parse(readFileSync(sessionRecordPath(sessionId), 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function readLegacyJobSessionRecord(jobName) {
+  try {
+    const raw = JSON.parse(readFileSync(join(SESSIONS_DIR, `${jobName}.json`), 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatSessionLabelTimestamp(iso) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
+function buildSessionLabel(record, fallbackName) {
+  const jobName = record.jobName || fallbackName || 'session';
+  const timestamp = formatSessionLabelTimestamp(record.createdAt || record.lastUsedAt);
+  const shortId = record.sessionId ? record.sessionId.slice(-8) : null;
+  const parts = [`${record.logId || '----'} ${jobName}`];
+  if (timestamp) parts.push(timestamp);
+  if (shortId) parts.push(`#${shortId}`);
+  return parts.join(' / ');
+}
+
+function readJobSessionUsage() {
+  try {
+    const raw = JSON.parse(readFileSync(JOB_SESSION_USAGE_PATH, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function listManagedSessions() {
+  let files = [];
+  try {
+    files = readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json') && f !== basename(JOB_SESSION_USAGE_PATH));
+  } catch {
+    return [];
+  }
+
+  const sessions = new Map();
+  for (const file of files) {
+    const fileKey = basename(file, '.json');
+    const direct = readSessionRecord(fileKey);
+    const legacy = direct?.sessionId ? null : readLegacyJobSessionRecord(fileKey);
+    const record = direct?.sessionId ? direct : legacy;
+    if (!record?.sessionId) continue;
+    sessions.set(record.sessionId, {
+      jobName: record.jobName || fileKey,
+      sessionId: record.sessionId,
+      logId: record.logId || '',
+      targetCli: record.targetCli || 'codex',
+      permissionProfile: record.permissionProfile || 'safe',
+      sessionKey: record.sessionKey || '',
+      createdAt: record.createdAt || null,
+      lastUsedAt: record.lastUsedAt || null,
+      lastUsedByJob: record.lastUsedByJob || null,
+      label: buildSessionLabel(record, fileKey),
+    });
+  }
+  return Array.from(sessions.values()).sort((a, b) => String(b.lastUsedAt || '').localeCompare(String(a.lastUsedAt || '')));
+}
+
+function findManagedSessionById(sessionId) {
+  return listManagedSessions().find((session) => session.sessionId === sessionId) || null;
+}
+
+function buildCommand(targetCli, permissionProfile, prompt, sessionStrategy, sessionRecord) {
   const target = normalizeTargetCli(targetCli) || 'gemini';
   const profile = ['safe', 'edit', 'plan', 'full'].includes(String(permissionProfile || '').trim().toLowerCase())
     ? String(permissionProfile).trim().toLowerCase()
     : 'safe';
+  const strategy = parseSessionStrategy(sessionStrategy);
   const quotedPrompt = `'${escapeSingleQuotedPrompt(prompt)}'`;
 
   if (target === 'gemini') {
@@ -247,7 +371,11 @@ function buildCommand(targetCli, permissionProfile, prompt) {
       full: '--approval-mode=yolo',
     };
     const flags = flagsByProfile[profile];
-    return `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`;
+    return {
+      command: `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`,
+      sessionEffectiveStrategy: 'fresh',
+      sessionWarning: strategy.mode === 'selected' ? 'selected session is not supported for Gemini yet; falling back to fresh' : null,
+    };
   }
 
   if (target === 'claude') {
@@ -257,7 +385,11 @@ function buildCommand(targetCli, permissionProfile, prompt) {
       plan: 'plan',
       full: 'bypassPermissions',
     };
-    return `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`;
+    return {
+      command: `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`,
+      sessionEffectiveStrategy: 'fresh',
+      sessionWarning: strategy.mode === 'selected' ? 'selected session is not supported for Claude Code yet; falling back to fresh' : null,
+    };
   }
 
   const codexFlagsByProfile = {
@@ -266,7 +398,19 @@ function buildCommand(targetCli, permissionProfile, prompt) {
     plan: '--sandbox read-only',
     full: '--full-auto',
   };
-  return `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`;
+  if (strategy.mode === 'selected' && strategy.sessionId) {
+    const resumeFlags = profile === 'full' ? ' --full-auto' : '';
+    return {
+      command: `codex exec resume ${strategy.sessionId}${resumeFlags} ${quotedPrompt}`,
+      sessionEffectiveStrategy: `session:${strategy.sessionId}`,
+      sessionWarning: null,
+    };
+  }
+  return {
+    command: `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`,
+    sessionEffectiveStrategy: 'fresh',
+    sessionWarning: null,
+  };
 }
 
 /**
@@ -342,6 +486,8 @@ function handleIndex(res) {
 /** GET /api/jobs — list all job definitions */
 function handleJobs(res) {
   const settings = loadSettings();
+  const sessions = listManagedSessions();
+  const usage = readJobSessionUsage();
   let files = [];
   try {
     files = readdirSync(JOBS_DIR).filter((f) => f.endsWith('.json'));
@@ -357,11 +503,21 @@ function handleJobs(res) {
       const job = JSON.parse(raw);
       const targetCli = normalizeTargetCli(job.targetCli || job.command) || 'gemini';
       const permissionProfile = inferPermissionProfile(targetCli, job.command, job.permissionProfile);
+      const recentSessionId = usage[name]?.sessionId || null;
+      const recentSessionRecord = recentSessionId
+        ? readSessionRecord(recentSessionId)
+        : readLegacyJobSessionRecord(name);
+      const legacyStrategy = String(job.sessionMode || '').trim().toLowerCase() === 'persistent' && recentSessionRecord?.sessionId
+        ? `session:${recentSessionRecord.sessionId}`
+        : 'fresh';
+      const sessionStrategy = normalizeSessionStrategy(job.sessionStrategy || legacyStrategy);
+      const parsedStrategy = parseSessionStrategy(sessionStrategy);
       const prompt = typeof job.prompt === 'string' && job.prompt.trim()
         ? job.prompt.trim()
         : summarizeCommand(job.command).prompt;
-      const runtimeCommand = buildCommand(targetCli, permissionProfile, prompt);
-      const commandSummary = summarizeCommand(runtimeCommand);
+      const selectedSession = parsedStrategy.sessionId ? sessions.find((s) => s.sessionId === parsedStrategy.sessionId) : null;
+      const commandInfo = buildCommand(targetCli, permissionProfile, prompt, sessionStrategy, selectedSession);
+      const commandSummary = summarizeCommand(commandInfo.command);
       // Check if any processes are currently running
       let running = 0;
       const runningProcesses = [];
@@ -383,11 +539,18 @@ function handleJobs(res) {
         logId:    typeof job.logId === 'string' && job.logId.trim() ? job.logId.trim() : '',
         targetCli,
         permissionProfile,
+        sessionStrategy,
         cron:     job.cron     ?? null,
-        command:  runtimeCommand,
+        command:  commandInfo.command,
         tool:     commandSummary.tool,
         prompt,
         flags:    commandSummary.flags,
+        sessionKey: selectedSession?.sessionKey || recentSessionRecord?.sessionKey || null,
+        selectedSessionId: parsedStrategy.sessionId,
+        selectedSessionLabel: selectedSession?.label || (parsedStrategy.sessionId ? `session ${parsedStrategy.sessionId.slice(0, 8)}` : 'fresh'),
+        recentSessionId,
+        sessionEffectiveStrategy: commandInfo.sessionEffectiveStrategy,
+        sessionWarning: commandInfo.sessionWarning,
         timezone: job.timezone ?? null,
         active:   job.active   !== false,
         running,
@@ -400,6 +563,194 @@ function handleJobs(res) {
   });
 
   sendJSON(res, 200, jobs);
+}
+
+function handleSessions(res) {
+  sendJSON(res, 200, listManagedSessions());
+}
+
+function runImmediateSessionPrompt(session, prompt) {
+  return new Promise((resolve, reject) => {
+    const targetCli = normalizeTargetCli(session?.targetCli) || 'codex';
+    if (targetCli !== 'codex') {
+      reject(new Error('selected session prompt is only supported for Codex right now'));
+      return;
+    }
+
+    const settings = loadSettings();
+    const workdir = settings.defaultWorkdir;
+    const permissionProfile = inferPermissionProfile(targetCli, '', session.permissionProfile);
+    const quotedPrompt = `'${escapeSingleQuotedPrompt(prompt)}'`;
+    const resumeFlags = permissionProfile === 'full' ? ' --full-auto' : '';
+    const command = `codex exec resume ${session.sessionId}${resumeFlags} ${quotedPrompt}`;
+    const logTag = `${session.logId || '----'}/adhoc`;
+    const startedAt = new Date().toISOString();
+    const [bin, args] = shellArgs(command);
+    const child = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      cwd: workdir,
+    });
+
+    const stdoutLines = [];
+    appendLog(logTag, `SESSION PROMPT → session:${session.sessionId}`);
+    appendLog(logTag, `FIRE → ${command}`);
+    appendLog(logTag, `CWD  → ${workdir}`);
+
+    child.stdout.on('data', (chunk) => {
+      for (const line of chunk.toString().split('\n')) {
+        if (!line.trim()) continue;
+        appendLog(`${logTag}/stdout`, line);
+        stdoutLines.push(line);
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      for (const line of chunk.toString().split('\n')) {
+        if (!line.trim()) continue;
+        appendLog(`${logTag}/stderr`, line);
+      }
+    });
+
+    child.on('error', (err) => {
+      appendLog(`${logTag}/error`, `spawn error: ${err.message}`);
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      appendLog(logTag, `EXIT code=${code ?? '?'}`);
+      try {
+        const ts = new Date().toISOString().replace(/:/g, '-');
+        const filename = `${session.jobName || 'session'}-adhoc-${ts}.txt`;
+        const filePath = join(RESULTS_DIR, filename);
+        const headerLines = [
+          `job: ${session.jobName || ''}`,
+          `logId: ${session.logId || ''}`,
+          `targetCli: ${targetCli}`,
+          `permissionProfile: ${permissionProfile}`,
+          `sessionStrategy: session:${session.sessionId}`,
+          `sessionEffectiveStrategy: session:${session.sessionId}`,
+          `sessionId: ${session.sessionId}`,
+          `sessionSourceJob: ${session.jobName || ''}`,
+          `runAt: ${startedAt}`,
+          `adhocPrompt: ${prompt}`,
+          '',
+        ];
+        writeFileSync(filePath, headerLines.join('\n') + stdoutLines.join('\n'), 'utf8');
+        appendLog(logTag, `Result saved → ${filename}`);
+        resolve({ filename, code: code ?? 0 });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
+}
+
+/** POST /api/sessions/:sessionId/prompt — send an immediate prompt to an existing session */
+function handleSessionPrompt(req, res, sessionId) {
+  let body = '';
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', async () => {
+    try {
+      const payload = body ? JSON.parse(body) : {};
+      const prompt = String(payload.prompt || '').trim();
+      if (!prompt) {
+        sendJSON(res, 400, { error: 'prompt is required' });
+        return;
+      }
+      const session = findManagedSessionById(sessionId);
+      if (!session) {
+        sendJSON(res, 404, { error: 'session not found' });
+        return;
+      }
+      const result = await runImmediateSessionPrompt(session, prompt);
+      sendJSON(res, 200, {
+        ok: true,
+        sessionId,
+        filename: result.filename,
+        code: result.code,
+      });
+    } catch (err) {
+      sendJSON(res, 500, { error: err?.message || 'failed to send prompt to session' });
+    }
+  });
+}
+
+/** POST /api/jobs — create a new job definition */
+function handleCreateJob(req, res) {
+  let body = '';
+  req.on('data', chunk => { body += chunk; });
+  req.on('end', () => {
+    try {
+      const payload = body ? JSON.parse(body) : {};
+      const name = String(payload.name || '').trim();
+      if (!isValidJobName(name)) {
+        sendJSON(res, 400, { error: 'job name is required and must not contain invalid path characters' });
+        return;
+      }
+
+      const filePath = join(JOBS_DIR, `${name}.json`);
+      if (existsSync(filePath)) {
+        sendJSON(res, 409, { error: 'job name already exists' });
+        return;
+      }
+
+      const logId = String(payload.logId || '').trim();
+      if (!isValidLogId(logId)) {
+        sendJSON(res, 400, { error: 'logId must be a unique 4-digit number' });
+        return;
+      }
+      if (collectOtherLogIds('__new__').has(logId)) {
+        sendJSON(res, 409, { error: 'logId already exists' });
+        return;
+      }
+
+      const targetCli = normalizeTargetCli(payload.targetCli) || 'gemini';
+      const permissionProfile = inferPermissionProfile(targetCli, '', payload.permissionProfile);
+      const prompt = String(payload.prompt || '').trim();
+      if (!prompt) {
+        sendJSON(res, 400, { error: 'prompt is required' });
+        return;
+      }
+
+      const cronExpr = String(payload.cron || '').trim();
+      if (!cronExpr || !cron.validate(cronExpr)) {
+        sendJSON(res, 400, { error: 'invalid cron expression' });
+        return;
+      }
+
+      const timezone = typeof payload.timezone === 'string' && payload.timezone.trim()
+        ? payload.timezone.trim()
+        : 'Asia/Tokyo';
+
+      const sessionStrategy = normalizeSessionStrategy(payload.sessionStrategy);
+      const parsedStrategy = parseSessionStrategy(sessionStrategy);
+      if (parsedStrategy.mode === 'selected') {
+        const selectedSession = listManagedSessions().find((s) => s.sessionId === parsedStrategy.sessionId);
+        if (!selectedSession) {
+          sendJSON(res, 400, { error: 'selected session not found' });
+          return;
+        }
+      }
+
+      const job = {
+        logId,
+        targetCli,
+        permissionProfile,
+        sessionStrategy,
+        prompt,
+        cron: cronExpr,
+        timezone,
+        active: payload.active !== false,
+      };
+
+      writeFileSync(filePath, JSON.stringify(job, null, 2) + '\n', 'utf8');
+      appendLog('ui', `CREATE job=${name} targetCli=${targetCli} permissionProfile=${permissionProfile} sessionStrategy=${sessionStrategy}`);
+      sendJSON(res, 201, { name, ...job });
+    } catch {
+      sendJSON(res, 500, { error: 'failed to create job' });
+    }
+  });
 }
 
 function handleGetSettings(res) {
@@ -455,6 +806,22 @@ function handleResults(res) {
 
       return { filename, jobName, timestamp, size };
     })
+    .map((entry) => {
+      try {
+        const content = readFileSync(join(RESULTS_DIR, entry.filename), 'utf8').slice(0, 2048);
+        const sessionIdMatch = content.match(/^sessionId:\s*(.+)$/m);
+        const sessionSourceJobMatch = content.match(/^sessionSourceJob:\s*(.*)$/m);
+        const sessionEffectiveMatch = content.match(/^sessionEffectiveStrategy:\s*(.+)$/m);
+        return {
+          ...entry,
+          sessionId: sessionIdMatch?.[1]?.trim() || null,
+          sessionSourceJob: sessionSourceJobMatch?.[1]?.trim() || null,
+          sessionEffectiveStrategy: sessionEffectiveMatch?.[1]?.trim() || 'fresh',
+        };
+      } catch {
+        return entry;
+      }
+    })
     .sort((a, b) => {
       // Sort by timestamp descending; nulls go to the end
       if (!a.timestamp && !b.timestamp) return 0;
@@ -509,7 +876,7 @@ function handleUpdateJob(req, res, jobName) {
       if (body) {
         // Body present → update specified fields
         const updates = JSON.parse(body);
-        const allowed = ['logId', 'targetCli', 'permissionProfile', 'prompt', 'cron', 'timezone', 'active'];
+        const allowed = ['logId', 'targetCli', 'permissionProfile', 'sessionStrategy', 'prompt', 'cron', 'timezone', 'active'];
         for (const key of allowed) {
           if (key in updates) job[key] = updates[key];
         }
@@ -529,8 +896,19 @@ function handleUpdateJob(req, res, jobName) {
 
         const targetCli = normalizeTargetCli(job.targetCli || '') || inferTargetCli(job.command) || 'gemini';
         const permissionProfile = inferPermissionProfile(targetCli, '', job.permissionProfile);
+        const usage = readJobSessionUsage();
+        const recentSessionId = usage[jobName]?.sessionId || null;
+        const recentSessionRecord = recentSessionId
+          ? readSessionRecord(recentSessionId)
+          : readLegacyJobSessionRecord(jobName);
+        const legacyStrategy = String(job.sessionMode || '').trim().toLowerCase() === 'persistent' && recentSessionRecord?.sessionId
+          ? `session:${recentSessionRecord.sessionId}`
+          : 'fresh';
+        const sessionStrategy = normalizeSessionStrategy(job.sessionStrategy || legacyStrategy);
         if (job.targetCli !== undefined) job.targetCli = targetCli;
         if (job.permissionProfile !== undefined || !job.permissionProfile) job.permissionProfile = permissionProfile;
+        job.sessionStrategy = sessionStrategy;
+        delete job.sessionMode;
 
         // Handle rename
         if (updates.name && updates.name !== jobName) {
@@ -563,6 +941,10 @@ function handleUpdateJob(req, res, jobName) {
           // Rename PID file if exists
           if (existsSync(pidPath)) {
             try { fs.renameSync(pidPath, join(PIDS_DIR, `${newName}.json`)); } catch { /* ignore */ }
+          }
+          const oldLegacySessionPath = join(SESSIONS_DIR, `${jobName}.json`);
+          if (existsSync(oldLegacySessionPath)) {
+            try { fs.renameSync(oldLegacySessionPath, join(SESSIONS_DIR, `${newName}.json`)); } catch { /* ignore */ }
           }
           sendJSON(res, 200, { name: newName, ...job });
           return;
@@ -779,7 +1161,7 @@ function router(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin':  '*',
-      'Access-Control-Allow-Methods': 'GET, PATCH, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });
     res.end();
@@ -788,6 +1170,20 @@ function router(req, res) {
 
   const url      = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+
+  if (req.method === 'POST') {
+    if (pathname === '/api/jobs') {
+      handleCreateJob(req, res);
+      return;
+    }
+    const sessionPromptMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/prompt$/);
+    if (sessionPromptMatch) {
+      handleSessionPrompt(req, res, decodeURIComponent(sessionPromptMatch[1]));
+      return;
+    }
+    sendJSON(res, 404, { error: 'not found' });
+    return;
+  }
 
   // PATCH /api/jobs/:name — toggle active
   if (req.method === 'PATCH') {
@@ -832,6 +1228,11 @@ function router(req, res) {
 
   if (pathname === '/api/jobs') {
     handleJobs(res);
+    return;
+  }
+
+  if (pathname === '/api/sessions') {
+    handleSessions(res);
     return;
   }
 

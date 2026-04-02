@@ -45,6 +45,7 @@
   "logId": "0001",
   "targetCli": "gemini",
   "permissionProfile": "safe",
+  "sessionStrategy": "fresh",
   "prompt": "ユーザーが指定したプロンプト",
   "cron": "0 9 * * *",
   "timezone": "Asia/Tokyo",
@@ -57,6 +58,7 @@
 | `logId` | string | ✓ | `0000`〜`9999` の4桁数字。既存ジョブと重複不可 |
 | `targetCli` | string | ✓ | `gemini` / `claude` / `codex`。新規ジョブでは省略しない |
 | `permissionProfile` | string |      | `safe` / `edit` / `plan` / `full`。未指定時は `safe` |
+| `sessionStrategy` | string |      | `fresh` または `session:<sessionId>`。未指定時は `fresh` |
 | `prompt`   | string  | ✓    | ユーザーに送る本文 |
 | `cron`     | string  | ✓    | cron 式（5フィールド形式） |
 | `timezone` | string  |      | タイムゾーン（省略時は `Asia/Tokyo` を推奨） |
@@ -64,7 +66,7 @@
 
 ### コマンドの組み立て
 
-CLI コマンドは JSON に直接保存しません。`targetCli` と `permissionProfile` からデーモンが自動生成します。
+CLI コマンドは JSON に直接保存しません。`targetCli` と `permissionProfile` と `sessionStrategy` からデーモンが自動生成します。
 
 | CLI | コマンド形式 |
 |-----|-------------|
@@ -79,6 +81,7 @@ CLI コマンドは JSON に直接保存しません。`targetCli` と `permissi
   "logId": "0001",
   "targetCli": "gemini",
   "permissionProfile": "safe",
+  "sessionStrategy": "fresh",
   "prompt": "ニュースまとめて",
   "cron": "0 9 * * *",
   "timezone": "Asia/Tokyo",
@@ -88,7 +91,7 @@ CLI コマンドは JSON に直接保存しません。`targetCli` と `permissi
 
 ### 権限の確認
 
-ユーザーのプロンプトに権限指定がない場合は、デフォルトで `safe` を使ってください。作成前の確認は不要です。
+ユーザーのプロンプトに権限指定がない場合は、デフォルトで `safe` を使ってください。セッション指定がない場合はデフォルトで `fresh` を使ってください。作成前の確認は不要です。
 
 - `safe` = もっとも安全寄りの既定値
 - Gemini CLI: `gemini -p 'プロンプト'`

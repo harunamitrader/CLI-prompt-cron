@@ -31,8 +31,11 @@ const JOBS_DIR    = join(BASE_DIR, 'jobs');
 const LOGS_DIR    = join(BASE_DIR, 'logs');
 const RESULTS_DIR = join(BASE_DIR, 'results');
 const PIDS_DIR    = join(BASE_DIR, 'pids');
+const SESSIONS_DIR = join(BASE_DIR, 'sessions');
 const SETTINGS_PATH = join(BASE_DIR, 'settings.json');
+const JOB_SESSION_USAGE_PATH = join(SESSIONS_DIR, 'job-usage.json');
 const FALLBACK_WORKDIR = process.env.CLI_PROMPT_CRON_WORKDIR || resolve(__dirname, '..', '..', '..', '..');
+const CODEX_SESSION_INDEX_PATH = resolve(process.env.USERPROFILE || process.env.HOME || '', '.codex', 'session_index.jsonl');
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -129,6 +132,21 @@ function normalizePermissionProfile(value) {
   return ['safe', 'edit', 'plan', 'full'].includes(v) ? v : null;
 }
 
+function normalizeSessionStrategy(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'fresh';
+  if (raw.toLowerCase() === 'fresh') return 'fresh';
+  const match = raw.match(/^session:(.+)$/i);
+  if (match && match[1].trim()) return `session:${match[1].trim()}`;
+  return 'fresh';
+}
+
+function parseSessionStrategy(value) {
+  const normalized = normalizeSessionStrategy(value);
+  if (normalized === 'fresh') return { mode: 'fresh', sessionId: null, value: 'fresh' };
+  return { mode: 'selected', sessionId: normalized.slice('session:'.length), value: normalized };
+}
+
 function parseLegacyCommand(cmd) {
   const raw = String(cmd || '').trim();
   if (!raw) return { targetCli: null, permissionProfile: null, prompt: '' };
@@ -168,12 +186,162 @@ function escapeSingleQuotedPrompt(prompt) {
   return String(prompt || '').replace(/'/g, "''");
 }
 
-function buildCommand(targetCli, permissionProfile, prompt) {
+function sessionRecordPath(sessionId) {
+  return join(SESSIONS_DIR, `${sessionId}.json`);
+}
+
+function makeSessionKey(jobName, logId) {
+  const base = (logId || jobName || 'job').toString().trim();
+  return `cli-prompt-cron-${base}`;
+}
+
+function readSessionRecord(sessionId) {
+  try {
+    const raw = JSON.parse(readFileSync(sessionRecordPath(sessionId), 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function readLegacyJobSessionRecord(jobName) {
+  try {
+    const raw = JSON.parse(readFileSync(join(SESSIONS_DIR, `${jobName}.json`), 'utf8'));
+    return raw && typeof raw === 'object' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionRecord(record) {
+  try {
+    if (!record?.sessionId) return;
+    writeFileSync(sessionRecordPath(record.sessionId), JSON.stringify(record, null, 2) + '\n', 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
+
+function updateJobSessionUsage(jobName, sessionId) {
+  try {
+    let usage = {};
+    try {
+      usage = JSON.parse(readFileSync(JOB_SESSION_USAGE_PATH, 'utf8'));
+    } catch {
+      usage = {};
+    }
+    usage[jobName] = {
+      sessionId,
+      updatedAt: new Date().toISOString(),
+    };
+    writeFileSync(JOB_SESSION_USAGE_PATH, JSON.stringify(usage, null, 2) + '\n', 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
+function readJobSessionUsage() {
+  try {
+    const raw = JSON.parse(readFileSync(JOB_SESSION_USAGE_PATH, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function findSessionOwnerById(sessionId) {
+  const direct = readSessionRecord(sessionId);
+  if (direct?.sessionId === sessionId) {
+    return { jobName: direct.jobName || direct.lastUsedByJob || '', record: direct };
+  }
+
+  let files = [];
+  try {
+    files = readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json') && f !== basename(JOB_SESSION_USAGE_PATH));
+  } catch {
+    return null;
+  }
+
+  for (const file of files) {
+    const name = basename(file, '.json');
+    const record = readLegacyJobSessionRecord(name);
+    if (record?.sessionId === sessionId) return { jobName: record.jobName || name, record };
+  }
+  return null;
+}
+
+function touchSelectedSession(sessionId, usedByJobName) {
+  const owner = findSessionOwnerById(sessionId);
+  if (!owner) return null;
+  const next = {
+    ...owner.record,
+    lastUsedAt: new Date().toISOString(),
+    lastUsedByJob: usedByJobName,
+  };
+  writeSessionRecord(next);
+  return { ownerJobName: owner.jobName, record: next };
+}
+
+function deleteSessionRecord(jobName, removeUsage = false) {
+  try {
+    const legacyPath = join(SESSIONS_DIR, `${jobName}.json`);
+    unlinkSync(legacyPath);
+  } catch {
+    /* ignore */
+  }
+  if (removeUsage) {
+    try {
+      const usage = JSON.parse(readFileSync(JOB_SESSION_USAGE_PATH, 'utf8'));
+      if (usage && typeof usage === 'object' && jobName in usage) {
+        delete usage[jobName];
+        writeFileSync(JOB_SESSION_USAGE_PATH, JSON.stringify(usage, null, 2) + '\n', 'utf8');
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function findLatestCodexSessionId(sinceIso) {
+  try {
+    const content = readFileSync(CODEX_SESSION_INDEX_PATH, 'utf8');
+    const lines = content.split('\n').filter(Boolean);
+    const since = Date.parse(sinceIso);
+    const candidates = [];
+    for (const line of lines) {
+      try {
+        const row = JSON.parse(line);
+        if (!row.id || !row.updated_at) continue;
+        const updatedAt = Date.parse(row.updated_at);
+        if (Number.isNaN(updatedAt)) continue;
+        if (!Number.isNaN(since) && updatedAt < since) continue;
+        candidates.push({ id: row.id, updatedAt });
+      } catch {
+        /* ignore broken row */
+      }
+    }
+    candidates.sort((a, b) => b.updatedAt - a.updatedAt);
+    return candidates[0]?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildCommand(targetCli, permissionProfile, prompt, sessionStrategy = 'fresh', sessionRecord = null) {
   const target = normalizeTargetCli(targetCli) || 'gemini';
   const profile = normalizePermissionProfile(permissionProfile) || 'safe';
+  const strategy = parseSessionStrategy(sessionStrategy);
   const quotedPrompt = `'${escapeSingleQuotedPrompt(prompt)}'`;
 
   if (target === 'gemini') {
+    if (strategy.mode === 'selected') {
+      return {
+        command: `gemini${profile === 'edit' ? ' --approval-mode=auto_edit' : profile === 'plan' ? ' --approval-mode=plan' : profile === 'full' ? ' --approval-mode=yolo' : ''} -p ${quotedPrompt}`,
+        sessionEffectiveStrategy: 'fresh',
+        sessionWarning: 'selected session is not supported for Gemini yet; falling back to fresh',
+        selectedSessionId: strategy.sessionId,
+      };
+    }
     const flagsByProfile = {
       safe: '',
       edit: '--approval-mode=auto_edit',
@@ -181,17 +349,25 @@ function buildCommand(targetCli, permissionProfile, prompt) {
       full: '--approval-mode=yolo',
     };
     const flags = flagsByProfile[profile];
-    return `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`;
+    return { command: `gemini${flags ? ' ' + flags : ''} -p ${quotedPrompt}`, sessionEffectiveStrategy: 'fresh', sessionWarning: null, selectedSessionId: null };
   }
 
   if (target === 'claude') {
+    if (strategy.mode === 'selected') {
+      return {
+        command: `claude --permission-mode ${profile === 'edit' ? 'acceptEdits' : profile === 'plan' ? 'plan' : profile === 'full' ? 'bypassPermissions' : 'default'} -p ${quotedPrompt}`,
+        sessionEffectiveStrategy: 'fresh',
+        sessionWarning: 'selected session is not supported for Claude Code yet; falling back to fresh',
+        selectedSessionId: strategy.sessionId,
+      };
+    }
     const modeByProfile = {
       safe: 'default',
       edit: 'acceptEdits',
       plan: 'plan',
       full: 'bypassPermissions',
     };
-    return `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`;
+    return { command: `claude --permission-mode ${modeByProfile[profile]} -p ${quotedPrompt}`, sessionEffectiveStrategy: 'fresh', sessionWarning: null, selectedSessionId: null };
   }
 
   const codexFlagsByProfile = {
@@ -200,7 +376,21 @@ function buildCommand(targetCli, permissionProfile, prompt) {
     plan: '--sandbox read-only',
     full: '--full-auto',
   };
-  return `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`;
+  if (strategy.mode === 'selected' && strategy.sessionId) {
+    const resumeFlags = profile === 'full' ? ' --full-auto' : '';
+    return {
+      command: `codex exec resume ${strategy.sessionId}${resumeFlags} ${quotedPrompt}`,
+      sessionEffectiveStrategy: `session:${strategy.sessionId}`,
+      sessionWarning: null,
+      selectedSessionId: strategy.sessionId,
+    };
+  }
+  return {
+    command: `codex exec ${codexFlagsByProfile[profile]} ${quotedPrompt}`,
+    sessionEffectiveStrategy: 'fresh',
+    sessionWarning: null,
+    selectedSessionId: null,
+  };
 }
 
 // ── Job runner ────────────────────────────────────────────────────────────────
@@ -211,10 +401,15 @@ function buildCommand(targetCli, permissionProfile, prompt) {
  * @param {string} jobName
  * @param {string} logTag
  * @param {string} command
+ * @param {{ targetCli: string, permissionProfile: string, prompt: string, sessionStrategy: string, sessionEffectiveStrategy: string, sessionKey?: string | null, sessionWarning?: string | null, selectedSessionId?: string | null }} context
  */
-function runCommand(jobName, logTag, command) {
+function runCommand(jobName, logTag, command, context) {
   const settings = loadSettings();
   const workdir = settings.defaultWorkdir;
+  const startedAt = new Date().toISOString();
+  const sessionStrategyLabel = context.sessionEffectiveStrategy || context.sessionStrategy || 'fresh';
+  if (context.sessionWarning) log(logTag, `SESSION → ${context.sessionWarning}`);
+  log(logTag, `SESSION → strategy=${sessionStrategyLabel}${context.sessionKey ? ` key=${context.sessionKey}` : ''}`);
   log(logTag, `FIRE → ${command}`);
   log(logTag, `CWD  → ${workdir}`);
 
@@ -239,7 +434,7 @@ function runCommand(jobName, logTag, command) {
 
   // Write PID to pid file (array of running processes)
   const pidFile = join(PIDS_DIR, `${jobName}.json`);
-  const pidEntry = { pid: child.pid, command, startedAt: new Date().toISOString(), logTag };
+  const pidEntry = { pid: child.pid, command, startedAt, logTag };
   try {
     let pids = [];
     try { pids = JSON.parse(readFileSync(pidFile, 'utf8')); } catch { /* new file */ }
@@ -250,6 +445,7 @@ function runCommand(jobName, logTag, command) {
 
   /** @type {string[]} */
   const stdoutLines = [];
+  let detectedSessionId = null;
 
   child.stdout.on('data', (chunk) => {
     for (const line of chunk.toString().split('\n')) {
@@ -262,7 +458,11 @@ function runCommand(jobName, logTag, command) {
 
   child.stderr.on('data', (chunk) => {
     for (const line of chunk.toString().split('\n')) {
-      if (line.trim()) log(`${logTag}/stderr`, line);
+      if (line.trim()) {
+        const sessionMatch = line.match(/session id:\s*([0-9a-f-]+)/i);
+        if (sessionMatch) detectedSessionId = sessionMatch[1];
+        log(`${logTag}/stderr`, line);
+      }
     }
   });
 
@@ -273,6 +473,39 @@ function runCommand(jobName, logTag, command) {
   child.on('close', (code) => {
     runningChildren.delete(child);
     log(logTag, `EXIT code=${code ?? '?'}`);
+
+    let resultSessionId = context.selectedSessionId || null;
+    let resultSessionSourceJob = null;
+
+    if (context.targetCli === 'codex' && context.selectedSessionId) {
+      const selected = touchSelectedSession(context.selectedSessionId, jobName);
+      if (selected) resultSessionSourceJob = selected.ownerJobName;
+      updateJobSessionUsage(jobName, context.selectedSessionId);
+    }
+
+    if (context.targetCli === 'codex' && context.sessionEffectiveStrategy === 'fresh') {
+      const sessionId = detectedSessionId || findLatestCodexSessionId(startedAt);
+      if (sessionId) {
+        writeSessionRecord({
+          jobName,
+          logId: logTag,
+          targetCli: context.targetCli,
+          permissionProfile: context.permissionProfile,
+          sessionStrategy: 'fresh',
+          sessionKey: context.sessionKey || makeSessionKey(jobName, logTag),
+          sessionId,
+          createdAt: startedAt,
+          lastUsedAt: new Date().toISOString(),
+          lastUsedByJob: jobName,
+        });
+        updateJobSessionUsage(jobName, sessionId);
+        resultSessionId = sessionId;
+        resultSessionSourceJob = jobName;
+        log(logTag, `SESSION → updated sessionId=${sessionId}`);
+      } else {
+        log(logTag, 'SESSION → no session id found in Codex session index after run');
+      }
+    }
 
     // Remove this PID from pid file
     try {
@@ -295,7 +528,19 @@ function runCommand(jobName, logTag, command) {
       const ts       = new Date().toISOString().replace(/:/g, '-');
       const filename = `${jobName}-${ts}.txt`;
       const filePath = join(RESULTS_DIR, filename);
-      writeFileSync(filePath, stdoutLines.join('\n'), 'utf8');
+      const headerLines = [
+        `job: ${jobName}`,
+        `logId: ${logTag}`,
+        `targetCli: ${context.targetCli}`,
+        `permissionProfile: ${context.permissionProfile}`,
+        `sessionStrategy: ${context.sessionStrategy || 'fresh'}`,
+        `sessionEffectiveStrategy: ${context.sessionEffectiveStrategy || 'fresh'}`,
+        `sessionId: ${resultSessionId || ''}`,
+        `sessionSourceJob: ${resultSessionSourceJob || ''}`,
+        `runAt: ${startedAt}`,
+        '',
+      ];
+      writeFileSync(filePath, headerLines.join('\n') + stdoutLines.join('\n'), 'utf8');
       log(logTag, `Result saved → ${filename}`);
     } catch (err) {
       log(logTag, `Failed to save result: ${err.message}`);
@@ -309,7 +554,7 @@ function runCommand(jobName, logTag, command) {
  * Parse a job file, validate it, and return a job object.
  * Returns null on any error.
  * @param {string} filePath
- * @returns {{ name: string, logId: string, targetCli: string, permissionProfile: string, prompt: string, command: string, timezone?: string, active: boolean } | null}
+ * @returns {{ name: string, logId: string, targetCli: string, permissionProfile: string, sessionStrategy: string, sessionKey: string, prompt: string, command: string, sessionEffectiveStrategy: string, selectedSessionId: string | null, sessionWarning: string | null, timezone?: string, active: boolean } | null}
  */
 function parseJob(filePath) {
   let raw;
@@ -341,6 +586,16 @@ function parseJob(filePath) {
   const legacy = parseLegacyCommand(job.command);
   const targetCli = normalizeTargetCli(job.targetCli) || legacy.targetCli;
   const permissionProfile = normalizePermissionProfile(job.permissionProfile) || legacy.permissionProfile || 'safe';
+  const jobName = basename(filePath, '.json');
+  const jobUsage = readJobSessionUsage();
+  const recentSessionId = jobUsage[jobName]?.sessionId || null;
+  const sessionRecord = recentSessionId
+    ? readSessionRecord(recentSessionId)
+    : readLegacyJobSessionRecord(jobName);
+  const legacyStrategy = String(job.sessionMode || '').trim().toLowerCase() === 'persistent' && sessionRecord?.sessionId
+    ? `session:${sessionRecord.sessionId}`
+    : 'fresh';
+  const sessionStrategy = normalizeSessionStrategy(job.sessionStrategy || legacyStrategy);
   const prompt = typeof job.prompt === 'string' && job.prompt.trim()
     ? job.prompt.trim()
     : legacy.prompt;
@@ -366,7 +621,6 @@ function parseJob(filePath) {
     return null;
   }
 
-  const name = basename(filePath, '.json');
   const logId = typeof job.logId === 'string' ? job.logId.trim() : '';
   if (!isValidLogId(logId)) {
     log('daemon', `Missing or invalid "logId" field in ${filePath}; expected a unique 4-digit number`);
@@ -378,14 +632,23 @@ function parseJob(filePath) {
     return null;
   }
 
+  const name = jobName;
+  const sessionKey = makeSessionKey(name, logId);
+  const commandInfo = buildCommand(targetCli, permissionProfile, prompt, sessionStrategy, sessionRecord);
+
   return {
     name,
     logId,
     targetCli,
     permissionProfile,
+    sessionStrategy,
+    sessionKey,
     prompt,
     cron:     job.cron.trim(),
-    command:  buildCommand(targetCli, permissionProfile, prompt),
+    command:  commandInfo.command,
+    sessionEffectiveStrategy: commandInfo.sessionEffectiveStrategy,
+    selectedSessionId: commandInfo.selectedSessionId,
+    sessionWarning: commandInfo.sessionWarning,
     timezone: typeof job.timezone === 'string' ? job.timezone.trim() : undefined,
     active:   job.active !== false, // default true
   };
@@ -415,14 +678,23 @@ function registerJob(filePath) {
 
   let task;
   try {
-    task = cron.schedule(job.cron, () => runCommand(job.name, job.logId, job.command), options);
+    task = cron.schedule(job.cron, () => runCommand(job.name, job.logId, job.command, {
+      targetCli: job.targetCli,
+      permissionProfile: job.permissionProfile,
+      prompt: job.prompt,
+      sessionStrategy: job.sessionStrategy,
+      sessionEffectiveStrategy: job.sessionEffectiveStrategy,
+      sessionKey: job.sessionKey,
+      sessionWarning: job.sessionWarning,
+      selectedSessionId: job.selectedSessionId,
+    }), options);
   } catch (err) {
     log('daemon', `Failed to schedule job "${job.name}": ${err.message}`);
     return;
   }
 
   tasks.set(job.name, task);
-  log('daemon', `Job "${job.name}" scheduled — cron="${job.cron}"${job.timezone ? ` tz=${job.timezone}` : ''} cwd="${loadSettings().defaultWorkdir}"`);
+  log('daemon', `Job "${job.name}" scheduled — cron="${job.cron}"${job.timezone ? ` tz=${job.timezone}` : ''} session=${job.sessionStrategy} cwd="${loadSettings().defaultWorkdir}"`);
 }
 
 /**
@@ -455,6 +727,10 @@ function ensureDirs() {
   mkdirSync(LOGS_DIR,    { recursive: true });
   mkdirSync(RESULTS_DIR, { recursive: true });
   mkdirSync(PIDS_DIR,    { recursive: true });
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+  if (!existsSync(JOB_SESSION_USAGE_PATH)) {
+    writeFileSync(JOB_SESSION_USAGE_PATH, '{}\n', 'utf8');
+  }
 }
 
 function loadExistingJobs() {

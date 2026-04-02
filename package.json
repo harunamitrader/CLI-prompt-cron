@@ -1,6 +1,6 @@
 {
   "name": "cli-prompt-cron",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "AI CLI cron daemon with browser dashboard — schedule prompts for Gemini CLI, Codex, Claude Code",
   "type": "module",
   "main": "start.js",
